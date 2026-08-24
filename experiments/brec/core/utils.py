@@ -24,7 +24,7 @@ from tensorflow.keras import mixed_precision
 
 import torch
 
-from src.core.env import KAGGLE
+from brec.core.env import KAGGLE
 
 
 # --- Robust Logging Configuration ---

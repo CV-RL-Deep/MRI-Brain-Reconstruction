@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from scipy.ndimage import find_objects
 
-from src.core.utils import logger, PipelineTimer
+from brec.core.utils import logger, PipelineTimer
 from configs.config import Config
 
 

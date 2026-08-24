@@ -7,10 +7,10 @@ from typing import Optional
 import numpy as np
 import tensorflow as tf
 
-from src.core.utils import logger
-from src.core.geometry import GeometryOps, InputProcessor
-from src.data.cache import DataLoaderBase
-from src.data.augmentations import AugmentationLogic
+from brec.core.utils import logger
+from brec.core.geometry import GeometryOps, InputProcessor
+from brec.data.cache import DataLoaderBase
+from brec.data.augmentations import AugmentationLogic
 from configs.config import Config
 
 

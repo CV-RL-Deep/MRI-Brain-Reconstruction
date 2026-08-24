@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 import nibabel as nib
 
-from src.core.utils import logger
+from brec.core.utils import logger
 
 
 # Constants for file filtering (from original script)

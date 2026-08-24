@@ -6,8 +6,8 @@ import numpy as np
 from dataclasses import dataclass, field, asdict
 from typing import Tuple, Optional
 
-from src.core.env import KAGGLE, PATH_DATA_IXI, PATH_DATA_BRATS
-from src.core.utils import logger
+from brec.core.env import KAGGLE, PATH_DATA_IXI, PATH_DATA_BRATS
+from brec.core.utils import logger
 
 
 @dataclass
@@ -66,9 +66,8 @@ class DataConfig:
     hallucination_buffer_size: int = 1920 if KAGGLE else 8064 # 5760 for the last 5 epochs
 
     # ---> NEW: Centralized Ablation Path <---
-    weights_dir: str = '/kaggle/input/datasets/valvex/brain-reconstruction-pretrain/ablations-B0' if KAGGLE else 'ablations'
-    # preload_dir: str = '/kaggle/input/brain-reconstruction-pretrain/ablations-latest' if KAGGLE else 'ablations-latest'
-    preload_dir: str = '/kaggle/input/notebooks/valvex/brain-reconstruction-brats/ablation_results' if KAGGLE else 'ablations-latest'
+    weights_dir: str = None
+    preload_dir: str = None 
     results_dir: str = 'ablation_results'
     figures_dir: str = 'paper_figures'
 

@@ -11,12 +11,12 @@ import seaborn as sns
 import tensorflow as tf
 
 from configs.config import CFG
-from src.data.files import find_t1_files, get_brats_subjects
+from brec.data.files import find_t1_files, get_brats_subjects
 from main import get_ablation_configs
-from src.data.cache import VolumeLoader
-from src.models.builder import ModelBuilder
-from src.inference.reconstructor import VolumeReconstructor
-from src.evaluation.visualizer import VisualizationSuite
+from brec.data.cache import VolumeLoader
+from brec.models.builder import ModelBuilder
+from brec.inference.reconstructor import VolumeReconstructor
+from brec.evaluation.visualizer import VisualizationSuite
 
 
 # 1. Config-Driven Pathing & Auto-Unzip

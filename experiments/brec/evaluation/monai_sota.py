@@ -7,11 +7,11 @@ import numpy as np
 
 import tensorflow as tf
 
-from src.core.utils import logger, InferenceProfiler
-from src.data.cache import VolumeLoader
-from src.evaluation.visualizer import VisualizationSuite
-from src.models.builder import ModelBuilder
-from src.inference.reconstructor import VolumeReconstructor
+from brec.core.utils import logger, InferenceProfiler
+from brec.data.cache import VolumeLoader
+from brec.evaluation.visualizer import VisualizationSuite
+from brec.models.builder import ModelBuilder
+from brec.inference.reconstructor import VolumeReconstructor
 from configs.config import Config
 
 

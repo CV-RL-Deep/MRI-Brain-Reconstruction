@@ -10,18 +10,18 @@ import numpy as np
 import optuna
 import tensorflow as tf
 
-from src.core.utils import logger, telemetry
+from brec.core.utils import logger, telemetry
 from configs.config import Config
-from src.data.cache import StaticLoader
-from src.data.generators import (IXIActiveGenerator, BraTSActiveGenerator,
+from brec.data.cache import StaticLoader
+from brec.data.generators import (IXIActiveGenerator, BraTSActiveGenerator,
                                  SequentialValidationGenerator, HpoTrainSequence,
                                  HpoValidSequence)
-from src.models.builder import ModelBuilder
-from src.models.losses import CompositeLoss, get_perceptual_loss
-from src.training.trainer import Trainer
-from src.evaluation.metrics import (OracleMAE, OracleMSE, OracleSSIM, OraclePSNR,
+from brec.models.builder import ModelBuilder
+from brec.models.losses import CompositeLoss, get_perceptual_loss
+from brec.training.trainer import Trainer
+from brec.evaluation.metrics import (OracleMAE, OracleMSE, OracleSSIM, OraclePSNR,
                                     GradientSharpnessMetric)
-from src.inference.reconstructor import VolumeReconstructor
+from brec.inference.reconstructor import VolumeReconstructor
 
 
 def compute_autoregressive_score(model, config, val_loader, ixi_files,

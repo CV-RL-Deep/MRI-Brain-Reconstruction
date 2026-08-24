@@ -11,7 +11,7 @@ import tensorflow as tf
 
 from tqdm import tqdm
 
-from src.core.utils import logger
+from brec.core.utils import logger
 from configs.config import Config
 
 
