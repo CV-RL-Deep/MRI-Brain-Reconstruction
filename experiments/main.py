@@ -679,8 +679,34 @@ def run_ablation_study(CFG):
 
 
 def main(mode='ablation', weights_dir = None, preload_dir = None):
+    """
+    Initializes configuration and launches a specific pipeline based on the `mode` argument.
+    Args:
+        mode (str): Pipeline execution mode. Defaults to 'ablation'.
+            Supported modes:
+            - 'all': Runs the full master pipeline (Ablation -> SOTA -> Frechet -> DSC -> CVPR).
+            - 'ablation': Runs the CVPR ablation study (train/inference for 5 models).
+            - 'sota': Evaluates our model against SOTA (MONAI 3D LDM, VQ-GAN).
+            - 'dsc': Calculates anatomical Dice metrics using FastSurfer.
+            - 'frechet': Calculates 3D-FID and FVD metrics.
+            - 'cvpr': Preloads previous results and generates final CVPR paper plots.
+            - 'train': Standard training (routed to run_pipeline).
+            - 'hpo': Hyperparameter optimization (routed to run_pipeline).
+            - 'eda': Exploratory Data Analysis dashboards (routed to run_pipeline).
+            - 'viz': Visualization mode using pretrained model (routed to run_pipeline).
+        weights_dir (str, optional): Path to pretrained weights. Defaults to None (falls back to 'ablations').
+        preload_dir (str, optional): Path to previous run results. Defaults to None (falls back to 'ablations-latest').
+    """
 
-    
+    if weights_dir:
+        CFG.data.weights_dir = weights_dir       
+    elif not CFG.data.weights_dir:
+        CFG.data.weights_dir = 'ablations'       
+
+    if preload_dir:
+        CFG.data.preload_dir = preload_dir
+    elif not CFG.data.preload_dir:
+        CFG.data.preload_dir = 'ablations-latest'
 
     try:
         # Lazy heavy imports (the notebook's own import cells cover them; Python caches the import)
@@ -691,21 +717,6 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
         from brec.evaluation.frechet import FrechetEvaluator
         from brec.evaluation.fastsurfer import FastSurferEvaluator
         from brec.evaluation.synthseg import SynthSegEvaluator
-
-        # To trigger the standard training, keep using run_pipeline(mode='train')
-        # We will add a quick manual branch here to run the ablation study
-
-        # mode = 'ablation'  # сhange to 'train', 'hpo', 'eda', 'ablation', 'cvpr', 'viz' as needed
-        # mode = 'sota'  # 'train', 'hpo', 'eda', 'ablation', 'dsc', 'frechet', 'cvpr', 'sota' etc...
-        # 'train', 'hpo', 'eda', 'ablation', 'sota', 'dsc', 'frechet', 'cvpr', 'all'
-        mode = 'cvpr'
-        mode = 'ablation'
-
-        if weights_dir:
-            CFG.data.weights_dir = weights_dir
-
-        if preload_dir:
-            CFG.data.preload_dir = preload_dir
 
 
         if mode == 'all':
@@ -757,7 +768,6 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
             dsc_eval.convert_to_nifti()
             dsc_eval.run_prediction()
             dsc_eval.calculate_dsc()
-
             # --- 5. CVPR PLOTTING ---
             logger.info("\n" + "=" * 50 + "\n PHASE 5: CVPR PLOTTING \n" + "=" * 50)
             run_cvpr_rendering(render_supp=False)
