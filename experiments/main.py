@@ -9,6 +9,10 @@ import gc
 import copy
 import argparse
 
+from brec.core.env import KAGGLE, configure_xla_paths
+if not KAGGLE:
+    configure_xla_paths()  
+
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -19,7 +23,8 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from tqdm import tqdm
 
 from configs.config import CFG, Config
-from brec.core.env import KAGGLE
+
+
 from brec.core.utils import logger, PipelineTimer, InferenceProfiler
 from brec.core.geometry import GeometryOps
 from brec.data.files import find_t1_files, get_brats_subjects
