@@ -7,6 +7,11 @@ import random
 import shutil
 import gc
 import copy
+import argparse
+
+from brec.core.env import KAGGLE, configure_xla_paths
+if not KAGGLE:
+    configure_xla_paths()  
 
 import numpy as np
 import pandas as pd
@@ -18,24 +23,25 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from tqdm import tqdm
 
 from configs.config import CFG, Config
-from src.core.env import KAGGLE
-from src.core.utils import logger, PipelineTimer, InferenceProfiler
-from src.core.geometry import GeometryOps
-from src.data.files import find_t1_files, get_brats_subjects
-from src.data.cache import ActiveLoader, StaticLoader, VolumeLoader
-from src.data.generators import (IXIActiveGenerator, BraTSActiveGenerator,
+
+
+from brec.core.utils import logger, PipelineTimer, InferenceProfiler
+from brec.core.geometry import GeometryOps
+from brec.data.files import find_t1_files, get_brats_subjects
+from brec.data.cache import ActiveLoader, StaticLoader, VolumeLoader
+from brec.data.generators import (IXIActiveGenerator, BraTSActiveGenerator,
                                  SequentialValidationGenerator, create_tf_dataset,
                                  get_training_dataset)
-from src.models.builder import ModelBuilder
-from src.models.losses import CompositeLoss
-import src.models.losses as _losses
-from src.training.trainer import Trainer
-from src.inference.reconstructor import VolumeReconstructor
-from src.evaluation.visualizer import (analyze_dataset_geometry, VisualizationSuite,
+from brec.models.builder import ModelBuilder
+from brec.models.losses import CompositeLoss
+import brec.models.losses as _losses
+from brec.training.trainer import Trainer
+from brec.inference.reconstructor import VolumeReconstructor
+from brec.evaluation.visualizer import (analyze_dataset_geometry, VisualizationSuite,
                                        VolumeDashboard)
-from src.hpo.engine import HPMEngine
-from src.hpo.merge import merge_hpo_databases
-from src.hpo.analysis import analyze_hpo_results
+from brec.hpo.engine import HPMEngine
+from brec.hpo.merge import merge_hpo_databases
+from brec.hpo.analysis import analyze_hpo_results
 
 
 def get_ablation_configs(base_cfg):
@@ -672,25 +678,46 @@ def run_ablation_study(CFG):
     run_ablation_study_(CFG, t_files, v_files, t_brats, v_brats)
 
 
-def main(mode='ablation'):
+def main(mode='ablation', weights_dir = None, preload_dir = None):
+    """
+    Initializes configuration and launches a specific pipeline based on the `mode` argument.
+    Args:
+        mode (str): Pipeline execution mode. Defaults to 'ablation'.
+            Supported modes:
+            - 'all': Runs the full master pipeline (Ablation -> SOTA -> Frechet -> DSC -> CVPR).
+            - 'ablation': Runs the CVPR ablation study (train/inference for 5 models).
+            - 'sota': Evaluates our model against SOTA (MONAI 3D LDM, VQ-GAN).
+            - 'dsc': Calculates anatomical Dice metrics using FastSurfer.
+            - 'frechet': Calculates 3D-FID and FVD metrics.
+            - 'cvpr': Preloads previous results and generates final CVPR paper plots.
+            - 'train': Standard training (routed to run_pipeline).
+            - 'hpo': Hyperparameter optimization (routed to run_pipeline).
+            - 'eda': Exploratory Data Analysis dashboards (routed to run_pipeline).
+            - 'viz': Visualization mode using pretrained model (routed to run_pipeline).
+        weights_dir (str, optional): Path to pretrained weights. Defaults to None (falls back to 'ablations').
+        preload_dir (str, optional): Path to previous run results. Defaults to None (falls back to 'ablations-latest').
+    """
+
+    if weights_dir:
+        CFG.data.weights_dir = weights_dir       
+    elif not CFG.data.weights_dir:
+        CFG.data.weights_dir = 'ablations'       
+
+    if preload_dir:
+        CFG.data.preload_dir = preload_dir
+    elif not CFG.data.preload_dir:
+        CFG.data.preload_dir = 'ablations-latest'
+
     try:
         # Lazy heavy imports (the notebook's own import cells cover them; Python caches the import)
         import cvpr_plots
         from cvpr_plots import (run_cvpr_rendering, generate_figure_4_anatomical_dsc,
                                 generate_figure_5_frechet_distances)
-        from src.evaluation.monai_sota import MonaiSotaEvaluator
-        from src.evaluation.frechet import FrechetEvaluator
-        from src.evaluation.fastsurfer import FastSurferEvaluator
-        from src.evaluation.synthseg import SynthSegEvaluator
+        from brec.evaluation.monai_sota import MonaiSotaEvaluator
+        from brec.evaluation.frechet import FrechetEvaluator
+        from brec.evaluation.fastsurfer import FastSurferEvaluator
+        from brec.evaluation.synthseg import SynthSegEvaluator
 
-        # To trigger the standard training, keep using run_pipeline(mode='train')
-        # We will add a quick manual branch here to run the ablation study
-
-        # mode = 'ablation'  # сhange to 'train', 'hpo', 'eda', 'ablation', 'cvpr', 'viz' as needed
-        # mode = 'sota'  # 'train', 'hpo', 'eda', 'ablation', 'dsc', 'frechet', 'cvpr', 'sota' etc...
-        # 'train', 'hpo', 'eda', 'ablation', 'sota', 'dsc', 'frechet', 'cvpr', 'all'
-        mode = 'cvpr'
-        mode = 'ablation'
 
         if mode == 'all':
             logger.info(">>> 🚀 INITIATING FULL MASTER EVALUATION PIPELINE 🚀 <<<")
@@ -741,7 +768,6 @@ def main(mode='ablation'):
             dsc_eval.convert_to_nifti()
             dsc_eval.run_prediction()
             dsc_eval.calculate_dsc()
-
             # --- 5. CVPR PLOTTING ---
             logger.info("\n" + "=" * 50 + "\n PHASE 5: CVPR PLOTTING \n" + "=" * 50)
             run_cvpr_rendering(render_supp=False)

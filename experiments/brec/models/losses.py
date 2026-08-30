@@ -2,7 +2,7 @@ import tensorflow as tf
 
 from tensorflow.keras import applications, models
 
-from src.core.utils import logger
+from brec.core.utils import logger
 from configs.config import Config
 
 

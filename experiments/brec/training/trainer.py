@@ -1,16 +1,16 @@
 import numpy as np
 import tensorflow as tf
 
-from src.core.env import KAGGLE
-from src.core.utils import logger
+from brec.core.env import KAGGLE
+from brec.core.utils import logger
 from configs.config import Config
-from src.models.builder import DiscriminatorBuilder
-from src.models.losses import (SpatiallyWeightedL1Loss, CompositeLoss,
+from brec.models.builder import DiscriminatorBuilder
+from brec.models.losses import (SpatiallyWeightedL1Loss, CompositeLoss,
                                VanillaL1Loss, RelaxedMHPLossWrapper,
                                SpectralLoss, get_perceptual_loss)
-from src.training.callbacks import (TrainingVisualizer, BufferUpdateCallback,
+from brec.training.callbacks import (TrainingVisualizer, BufferUpdateCallback,
                                     GeneratorCheckpoint)
-from src.evaluation.metrics import (OracleMAE, OracleMSE, OracleSSIM, OraclePSNR,
+from brec.evaluation.metrics import (OracleMAE, OracleMSE, OracleSSIM, OraclePSNR,
                                     GradientSharpnessMetric)
 
 

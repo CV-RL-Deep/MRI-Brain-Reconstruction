@@ -3,7 +3,7 @@ import tensorflow.keras.backend as K
 
 from tensorflow.keras import layers, models, applications
 
-from src.models.layers import (SpectralNormalization, Sampling, VAELossLayer,
+from brec.models.layers import (SpectralNormalization, Sampling, VAELossLayer,
                                InstanceNormalization, FourierEmbedding,
                                SPADEResBlock)
 from configs.config import Config

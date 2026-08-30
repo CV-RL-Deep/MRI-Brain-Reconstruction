@@ -5,8 +5,8 @@ import tensorflow as tf
 
 from tqdm import tqdm
 
-from src.core.utils import logger
-from src.core.geometry import GeometryOps, InputProcessor
+from brec.core.utils import logger
+from brec.core.geometry import GeometryOps, InputProcessor
 from configs.config import Config
 
 

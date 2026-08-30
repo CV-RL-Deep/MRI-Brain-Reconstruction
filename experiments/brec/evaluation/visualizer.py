@@ -17,8 +17,8 @@ import nibabel as nib
 
 from tqdm import tqdm
 
-from src.core.utils import logger
-from src.data.cache import VolumeLoader
+from brec.core.utils import logger
+from brec.data.cache import VolumeLoader
 from configs.config import Config
 
 

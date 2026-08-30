@@ -11,7 +11,7 @@ import torchvision.models.video as video_models
 
 from tqdm import tqdm
 
-from src.core.utils import logger
+from brec.core.utils import logger
 from configs.config import Config
 
 

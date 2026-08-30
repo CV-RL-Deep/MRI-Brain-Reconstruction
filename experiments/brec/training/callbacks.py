@@ -6,10 +6,10 @@ import tensorflow as tf
 
 import matplotlib.pyplot as plt
 
-from src.core.utils import logger
-from src.core.geometry import GeometryOps, InputProcessor
-from src.data.generators import GeneratorBase
-from src.evaluation.metrics import get_oracle_prediction
+from brec.core.utils import logger
+from brec.core.geometry import GeometryOps, InputProcessor
+from brec.data.generators import GeneratorBase
+from brec.evaluation.metrics import get_oracle_prediction
 
 
 class TrainingVisualizer(tf.keras.callbacks.Callback):
