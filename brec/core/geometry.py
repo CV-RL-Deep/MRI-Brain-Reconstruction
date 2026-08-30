@@ -5,8 +5,8 @@ import tensorflow as tf
 
 from scipy.ndimage import find_objects
 
-from brec.core.utils import logger, PipelineTimer
-from configs.config import Config
+from .utils import logger, PipelineTimer
+from ..config import Config
 
 
 class GeometryOps:
@@ -16,9 +16,9 @@ class GeometryOps:
     """
 
     @staticmethod
-    def get_smart_crop_coords(volume: np.ndarray,
-                              target_shape: Tuple[int, int]
-                             ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    def get_smart_crop_coords(
+        volume: np.ndarray, target_shape: Tuple[int, int]
+    ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         """
         Calculates the bounding box to center the brain in the frame.
         Uses Numpy/Scipy (CPU) as this runs once during volume loading.
@@ -54,14 +54,21 @@ class GeometryOps:
         max_h, max_w = volume.shape[1], volume.shape[2]
 
         # Adjust if out of bounds (left/top)
-        if h_start < 0: h_start = 0
-        if w_start < 0: w_start = 0
+        if h_start < 0:
+            h_start = 0
+        if w_start < 0:
+            w_start = 0
 
         # Adjust if out of bounds (right/bottom) - shift back
-        if h_start + th > max_h: h_start = max(0, max_h - th)
-        if w_start + tw > max_w: w_start = max(0, max_w - tw)
+        if h_start + th > max_h:
+            h_start = max(0, max_h - th)
+        if w_start + tw > max_w:
+            w_start = max(0, max_w - tw)
 
-        return (int(h_start), int(h_start + th)), (int(w_start), int(w_start + tw))
+        return (int(h_start), int(h_start + th)), (
+            int(w_start),
+            int(w_start + tw),
+        )
 
     @staticmethod
     @tf.function
@@ -84,9 +91,7 @@ class GeometryOps:
     @staticmethod
     @tf.function
     def resize_and_pad(
-        image: tf.Tensor,
-        target_shape: Tuple[int, int],
-        method: str = 'bicubic'
+        image: tf.Tensor, target_shape: Tuple[int, int], method: str = 'bicubic'
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         """
         Resizes image to fit target_shape preserving aspect ratio (Letterbox),
@@ -103,9 +108,14 @@ class GeometryOps:
         """
         # Ensure 3D (H, W, C) for resize ops
         input_shape = tf.shape(image)
-        h, w = tf.cast(input_shape[0], tf.float32), tf.cast(input_shape[1], tf.float32)
-        target_h, target_w = tf.cast(target_shape[0], tf.float32), tf.cast(target_shape[1],
-                                                                           tf.float32)
+        h, w = (
+            tf.cast(input_shape[0], tf.float32),
+            tf.cast(input_shape[1], tf.float32),
+        )
+        target_h, target_w = (
+            tf.cast(target_shape[0], tf.float32),
+            tf.cast(target_shape[1], tf.float32),
+        )
 
         # Calculate Scale
         scale = tf.minimum(target_h / h, target_w / w)
@@ -139,10 +149,12 @@ class GeometryOps:
 
     @staticmethod
     @tf.function
-    def inverse_resize_pad(image: tf.Tensor,
-                           original_shape: Tuple[int, int],
-                           scale: float,
-                           pads: tf.Tensor) -> tf.Tensor:
+    def inverse_resize_pad(
+        image: tf.Tensor,
+        original_shape: Tuple[int, int],
+        scale: float,
+        pads: tf.Tensor,
+    ) -> tf.Tensor:
         """
         Reverses the resize_and_pad operation (Crop -> Inverse Resize).
         Useful for reconstructing full volumes from model outputs.
@@ -157,10 +169,14 @@ class GeometryOps:
         active_h = tf.cast(tf.cast(orig_h, tf.float32) * scale, tf.int32)
         active_w = tf.cast(tf.cast(orig_w, tf.float32) * scale, tf.int32)
 
-        image_cropped = tf.image.crop_to_bounding_box(image, pad_top, pad_left, active_h, active_w)
+        image_cropped = tf.image.crop_to_bounding_box(
+            image, pad_top, pad_left, active_h, active_w
+        )
 
         # 2. Resize Up (Bicubic usually better for upsampling)
-        image_restored = tf.image.resize(image_cropped, [orig_h, orig_w], method='bicubic')
+        image_restored = tf.image.resize(
+            image_cropped, [orig_h, orig_w], method='bicubic'
+        )
 
         return image_restored
 
@@ -176,38 +192,51 @@ def run_geometry_sanity_check(config):
         norm_tensor = GeometryOps.normalize_volume(dummy_tensor)
 
         # 2. Test Resize/Pad
-        padded, scale, pads = GeometryOps.resize_and_pad(norm_tensor, config.data.padded_size)
+        padded, scale, pads = GeometryOps.resize_and_pad(
+            norm_tensor, config.data.padded_size
+        )
 
         # 3. Test Inverse
-        restored = GeometryOps.inverse_resize_pad(padded, (113, 137), scale, pads)
+        restored = GeometryOps.inverse_resize_pad(
+            padded, (113, 137), scale, pads
+        )
 
         logger.info(f"Original Shape: {dummy_tensor.shape}")
-        logger.info(f"Padded Shape: {padded.shape} (Target: {config.data.padded_size})")
+        logger.info(
+            f"Padded Shape: {padded.shape} (Target: {config.data.padded_size})"
+        )
         logger.info(f"Restored Shape: {restored.shape}")
         logger.info("Geometry Sanity Check Passed.")
 
 
 class InputProcessor:
     @staticmethod
-    def prepare_model_input(input_stack_native: np.ndarray,
-                            target_slice_native: np.ndarray,
-                            start_idx: int,
-                            target_idx: int,
-                            axis_size: int,
-                            direction: str,
-                            void_mask_native: np.ndarray = None,
-                            config: Config = None):
+    def prepare_model_input(
+        input_stack_native: np.ndarray,
+        target_slice_native: np.ndarray,
+        start_idx: int,
+        target_idx: int,
+        axis_size: int,
+        direction: str,
+        void_mask_native: np.ndarray = None,
+        config: Config = None,
+    ):
         N = config.data.neighborhood
 
         # 1. Handle History Image Stack (Ensure H, W, N)
-        if input_stack_native.shape[0] == N and input_stack_native.shape[2] != N:
-             input_stack_native = np.transpose(input_stack_native, (1, 2, 0))
+        if (
+            input_stack_native.shape[0] == N
+            and input_stack_native.shape[2] != N
+        ):
+            input_stack_native = np.transpose(input_stack_native, (1, 2, 0))
 
         # 2. Handle Target Mask (1 Channel)
         brain_mask = (target_slice_native > 0.01).astype(np.float32)[..., None]
 
         # 3. Positional Encodings (Absolute)
-        p_abs = np.array([target_idx / max(1.0, float(axis_size - 1))], dtype=np.float32)
+        p_abs = np.array(
+            [target_idx / max(1.0, float(axis_size - 1))], dtype=np.float32
+        )
 
         step = 1 if direction == 'forward' else -1
         p_history = []
@@ -223,7 +252,11 @@ class InputProcessor:
             'history_input': input_stack_native.astype(np.float32),
             'mask_input': brain_mask,
             'p_history_input': p_history_arr,
-            'p_abs_input': p_abs
+            'p_abs_input': p_abs,
         }
 
-        return model_inputs, 1.0, np.array([0, 0]) # mock scale/pads for generator compatibility
+        return (
+            model_inputs,
+            1.0,
+            np.array([0, 0]),
+        )  # mock scale/pads for generator compatibility

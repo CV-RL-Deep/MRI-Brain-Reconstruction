@@ -2,8 +2,8 @@ import tensorflow as tf
 
 from tensorflow.keras import applications, models
 
-from brec.core.utils import logger
-from configs.config import Config
+from ..configs.config import Config
+from ..core.utils import logger
 
 
 class PerceptualLoss(tf.keras.losses.Loss):
@@ -11,8 +11,14 @@ class PerceptualLoss(tf.keras.losses.Loss):
     Computes distance in EfficientNet feature space.
     Reusable component for U-Net and GAN training.
     """
-    def __init__(self, name='perceptual_loss', backbone='effnet',
-                 weights='imagenet', input_shape=(None, None, 3)):
+
+    def __init__(
+        self,
+        name='perceptual_loss',
+        backbone='effnet',
+        weights='imagenet',
+        input_shape=(None, None, 3),
+    ):
         # tf.keras.backend.clear_session() # may cause memory leak
         super().__init__(name=name)
 
@@ -24,7 +30,8 @@ class PerceptualLoss(tf.keras.losses.Loss):
             # Use VGG19. It avoids conflict with EfficientNet generator backbones.
             # VGG expects (224, 224, 3) but works with (None, None, 3)
             base = applications.VGG19(
-                include_top=False, weights=weights, # input_shape=(None, None, 3)
+                include_top=False,
+                weights=weights,  # input_shape=(None, None, 3)
             )
 
         else:
@@ -37,7 +44,7 @@ class PerceptualLoss(tf.keras.losses.Loss):
             base = applications.EfficientNetB0(
                 # name='effnet_perceptual',
                 include_top=False,
-                weights=weights, # 'imagenet'
+                weights=weights,  # 'imagenet'
             )
 
         base.trainable = False
@@ -46,7 +53,11 @@ class PerceptualLoss(tf.keras.losses.Loss):
             # Standard layers for style/texture loss:
             # block1_conv1, block2_conv1, block3_conv1, block4_conv1, block5_conv1
             layer_names = [
-                'block1_conv1', 'block2_conv1', 'block3_conv1', 'block4_conv1', 'block5_conv1'
+                'block1_conv1',
+                'block2_conv1',
+                'block3_conv1',
+                'block4_conv1',
+                'block5_conv1',
             ]
             outputs = [base.get_layer(name).output for name in layer_names]
 
@@ -56,13 +67,16 @@ class PerceptualLoss(tf.keras.losses.Loss):
             # 'block2a' and 'block3a' capture low-to-mid level features (edges, textures):
             # 'block2a' (low-level texture) and 'block3a' (mid-level shape)
             outputs = [
-                base.get_layer(n).output for n in [
-                    'block2a_expand_activation', 'block3a_expand_activation'
+                base.get_layer(n).output
+                for n in [
+                    'block2a_expand_activation',
+                    'block3a_expand_activation',
                 ]
             ]
 
-            self.model = models.Model(base.input, outputs,
-                                      name="extractor_effnet")
+            self.model = models.Model(
+                base.input, outputs, name="extractor_effnet"
+            )
 
     def call(self, y_true, y_pred):
         # Expects single channel 0-1 inputs
@@ -98,7 +112,7 @@ def get_perceptual_loss(config: Config):
         _GLOBAL_PERCEPTUAL_LOSS = PerceptualLoss(
             backbone=config.train.perceptual_backbone,
             weights=config.train.perceptual_init,
-            input_shape=(*config.data.padded_size, 3)
+            input_shape=(*config.data.padded_size, 3),
         )
     return _GLOBAL_PERCEPTUAL_LOSS
 
@@ -108,12 +122,15 @@ class SpectralLoss(tf.keras.losses.Loss):
     Computes the L1 distance between the Log-Magnitude of the Fourier Transforms.
     Forces the model to match the frequency distribution (sharpness/texture) of the target.
     """
+
     def __init__(self, name="spectral_loss"):
         super().__init__(name=name)
 
     def call(self, y_true, y_pred):
         # 1. Cast to float32 (FFT requires it, and mixed precision might be float16)
-        y_true_f32 = tf.cast(y_true[..., 0], tf.float32) # take 1st channel (Image)
+        y_true_f32 = tf.cast(
+            y_true[..., 0], tf.float32
+        )  # take 1st channel (Image)
         y_pred_f32 = tf.cast(y_pred[..., 0], tf.float32)
 
         # 2. Compute 2D Real FFT
@@ -141,6 +158,7 @@ class FocalFrequencyLoss(tf.keras.losses.Loss):
     Penalizes both magnitude and phase differences in the complex frequency domain,
     dynamically up-weighting frequencies where the model performs poorly.
     """
+
     def __init__(self, alpha: float = 1.0, name: str = "focal_frequency_loss"):
         super().__init__(name=name)
         self.alpha = alpha
@@ -193,18 +211,24 @@ class CompositeLoss(tf.keras.losses.Loss):
         self.spectral = SpectralLoss()
 
         # FIX: Convert static floats to dynamic TensorFlow Variables
-        self.w_healthy = tf.Variable(self.cfg.lambda_healthy, dtype=tf.float32,
-                                     trainable=False)
-        self.w_tumor = tf.Variable(self.cfg.lambda_tumor, dtype=tf.float32,
-                                   trainable=False)
-        self.w_bg = tf.Variable(self.cfg.lambda_background, dtype=tf.float32,
-                                trainable=False)
-        self.w_grad = tf.Variable(self.cfg.lambda_grad, dtype=tf.float32,
-                                  trainable=False)
-        self.w_perc = tf.Variable(self.cfg.lambda_perceptual, dtype=tf.float32,
-                                  trainable=False)
-        self.w_spec = tf.Variable(self.cfg.lambda_spectral, dtype=tf.float32,
-                                  trainable=False)
+        self.w_healthy = tf.Variable(
+            self.cfg.lambda_healthy, dtype=tf.float32, trainable=False
+        )
+        self.w_tumor = tf.Variable(
+            self.cfg.lambda_tumor, dtype=tf.float32, trainable=False
+        )
+        self.w_bg = tf.Variable(
+            self.cfg.lambda_background, dtype=tf.float32, trainable=False
+        )
+        self.w_grad = tf.Variable(
+            self.cfg.lambda_grad, dtype=tf.float32, trainable=False
+        )
+        self.w_perc = tf.Variable(
+            self.cfg.lambda_perceptual, dtype=tf.float32, trainable=False
+        )
+        self.w_spec = tf.Variable(
+            self.cfg.lambda_spectral, dtype=tf.float32, trainable=False
+        )
 
     def call(self, y_true, y_pred):
         """
@@ -224,28 +248,29 @@ class CompositeLoss(tf.keras.losses.Loss):
         healthy_mask = tf.maximum(0.0, brain_mask - tumor_mask)
         loss_healthy = tf.math.divide_no_nan(
             tf.reduce_sum(mae * healthy_mask),
-            tf.reduce_sum(healthy_mask)# + 1e-8
+            tf.reduce_sum(healthy_mask),  # + 1e-8
         )
 
         # Tumor Region (The Inpainting Target - Critical)
         # Fix: Robust Division prevents NaN when batch has no tumor
         loss_tumor = tf.math.divide_no_nan(
             tf.reduce_sum(mae * tumor_mask),
-            tf.reduce_sum(tumor_mask)# + 1e-8
+            tf.reduce_sum(tumor_mask),  # + 1e-8
         )
 
         # Background
         bg_mask = 1.0 - brain_mask
         loss_bg = tf.math.divide_no_nan(
             tf.reduce_sum(mae * bg_mask),
-            tf.reduce_sum(bg_mask)# + 1e-8
+            tf.reduce_sum(bg_mask),  # + 1e-8
         )
 
         # 2. Gradient Loss (Sharpness)
         dy_true, dx_true = tf.image.image_gradients(gt_img)
         dy_pred, dx_pred = tf.image.image_gradients(y_pred)
-        grad_loss = tf.reduce_mean(tf.abs(dy_true - dy_pred) +
-                                   tf.abs(dx_true - dx_pred))
+        grad_loss = tf.reduce_mean(
+            tf.abs(dy_true - dy_pred) + tf.abs(dx_true - dx_pred)
+        )
 
         # 3. Perceptual Loss (Conditional Bypass)
         if self.perceptual is not None:
@@ -258,12 +283,14 @@ class CompositeLoss(tf.keras.losses.Loss):
 
         # Combine weighted losses
         # FIX: Multiply by the dynamic Variables
-        total = (self.w_healthy * loss_healthy +
-                 self.w_tumor * loss_tumor +
-                 self.w_bg * loss_bg +
-                 self.w_grad * grad_loss +
-                 self.w_perc * perc_loss +
-                 self.w_spec * spec_loss)
+        total = (
+            self.w_healthy * loss_healthy
+            + self.w_tumor * loss_tumor
+            + self.w_bg * loss_bg
+            + self.w_grad * grad_loss
+            + self.w_perc * perc_loss
+            + self.w_spec * spec_loss
+        )
 
         return total
 
@@ -273,10 +300,11 @@ class SpatiallyWeightedL1Loss(tf.keras.losses.Loss):
     L1 Loss that applies heavy penalties to Brain and Tumor regions.
     Ported from SPADE GAN logic: weights = 1 (Bg) + 14 (Brain) + 10 (Tumor).
     """
+
     def __init__(self, config: Config, name="spatial_l1_loss"):
         super().__init__(name=name)
-        self.w_brain_add = 14.0 # base 1 + 14 = 15
-        self.w_tumor_add = 10.0 # 15 + 10 = 25 for tumor regions
+        self.w_brain_add = 14.0  # base 1 + 14 = 15
+        self.w_tumor_add = 10.0  # 15 + 10 = 25 for tumor regions
 
     def call(self, y_true, y_pred):
         # Unpack
@@ -306,6 +334,7 @@ class VanillaL1Loss(tf.keras.losses.Loss):
     Standard L1 Loss without any spatial or region-based weighting.
     Used to demonstrate unbounded spatial drift in unconstrained baseline models.
     """
+
     def __init__(self, name="vanilla_l1_loss"):
         super().__init__(name=name)
 
@@ -348,25 +377,33 @@ class RelaxedMHPLossWrapper(tf.keras.losses.Loss):
 
         # 2. Calculate base CompositeLoss for each hypothesis
         # self.base_loss_fn should return shape (B,)
-        losses =[]
+        losses = []
         for p in preds:
-            p_expanded = tf.expand_dims(p, -1) # Restore channel dim -> (B, H, W, 1)
+            p_expanded = tf.expand_dims(
+                p, -1
+            )  # Restore channel dim -> (B, H, W, 1)
             losses.append(self.base_loss_fn(y_true, p_expanded))
 
         # Stack losses -> Shape: (M, Batch)
         losses_tensor = tf.stack(losses, axis=0)
 
         # 3. Find the best hypothesis for each batch item (The Oracle)
-        best_indices = tf.argmin(losses_tensor, axis=0) # shape: (Batch,)
+        best_indices = tf.argmin(losses_tensor, axis=0)  # shape: (Batch,)
 
         # 4. Create masks for winners and losers
-        winner_mask = tf.one_hot(best_indices, depth=self.M) # shape: (Batch, M)
-        winner_mask = tf.transpose(winner_mask)              # shape: (M, Batch)
+        winner_mask = tf.one_hot(
+            best_indices, depth=self.M
+        )  # shape: (Batch, M)
+        winner_mask = tf.transpose(winner_mask)  # shape: (M, Batch)
 
         # 5. Apply Epsilon Relaxation
-        weights = (winner_mask * self.winner_weight) + ((1.0 - winner_mask) * self.loser_weight)
+        weights = (winner_mask * self.winner_weight) + (
+            (1.0 - winner_mask) * self.loser_weight
+        )
 
         # 6. Weight the losses and sum across the M dimension
-        relaxed_losses = tf.reduce_sum(losses_tensor * weights, axis=0) # shape: (Batch,)
+        relaxed_losses = tf.reduce_sum(
+            losses_tensor * weights, axis=0
+        )  # shape: (Batch,)
 
         return relaxed_losses

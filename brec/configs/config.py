@@ -6,8 +6,8 @@ from typing import Tuple, Optional
 
 import numpy as np
 
-from brec.core.env import KAGGLE, PATH_DATA_IXI, PATH_DATA_BRATS
-from brec.core.utils import logger
+from ..core.env import KAGGLE, PATH_DATA_IXI, PATH_DATA_BRATS
+from ..core.utils import logger
 
 
 @dataclass

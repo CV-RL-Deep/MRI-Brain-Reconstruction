@@ -1,17 +1,29 @@
-import numpy as np
 import tensorflow as tf
 
-from brec.core.env import KAGGLE
-from brec.core.utils import logger
-from configs.config import Config
-from brec.models.builder import DiscriminatorBuilder
-from brec.models.losses import (SpatiallyWeightedL1Loss, CompositeLoss,
-                               VanillaL1Loss, RelaxedMHPLossWrapper,
-                               SpectralLoss, get_perceptual_loss)
-from brec.training.callbacks import (TrainingVisualizer, BufferUpdateCallback,
-                                    GeneratorCheckpoint)
-from brec.evaluation.metrics import (OracleMAE, OracleMSE, OracleSSIM, OraclePSNR,
-                                    GradientSharpnessMetric)
+from ..configs.config import Config
+from ..core.env import KAGGLE
+from ..core.utils import logger
+from ..models.builder import DiscriminatorBuilder
+from ..models.losses import (
+    SpatiallyWeightedL1Loss,
+    CompositeLoss,
+    VanillaL1Loss,
+    RelaxedMHPLossWrapper,
+    SpectralLoss,
+    get_perceptual_loss,
+)
+from .callbacks import (
+    TrainingVisualizer,
+    BufferUpdateCallback,
+    GeneratorCheckpoint,
+)
+from ..evaluation.metrics import (
+    OracleMAE,
+    OracleMSE,
+    OracleSSIM,
+    OraclePSNR,
+    GradientSharpnessMetric,
+)
 
 
 class SPADEGANTrainer(tf.keras.Model):
@@ -31,18 +43,24 @@ class SPADEGANTrainer(tf.keras.Model):
         self.spectral = SpectralLoss()
 
         # --- FIX: Convert GAN weights to dynamic TF Variables ---
-        self.w_gan = tf.Variable(self.cfg.train.weight_gan, dtype=tf.float32,
-                                 trainable=False)
-        self.w_fm = tf.Variable(self.cfg.train.weight_fm, dtype=tf.float32,
-                                trainable=False)
-        self.w_l1 = tf.Variable(self.cfg.train.weight_l1, dtype=tf.float32,
-                                trainable=False)
-        self.w_perc = tf.Variable(self.cfg.train.weight_perceptual,
-                                  dtype=tf.float32, trainable=False)
-        self.w_spec = tf.Variable(self.cfg.train.weight_spectral,
-                                  dtype=tf.float32, trainable=False)
-        self.w_kl = tf.Variable(self.cfg.train.weight_kl, dtype=tf.float32,
-                                trainable=False)
+        self.w_gan = tf.Variable(
+            self.cfg.train.weight_gan, dtype=tf.float32, trainable=False
+        )
+        self.w_fm = tf.Variable(
+            self.cfg.train.weight_fm, dtype=tf.float32, trainable=False
+        )
+        self.w_l1 = tf.Variable(
+            self.cfg.train.weight_l1, dtype=tf.float32, trainable=False
+        )
+        self.w_perc = tf.Variable(
+            self.cfg.train.weight_perceptual, dtype=tf.float32, trainable=False
+        )
+        self.w_spec = tf.Variable(
+            self.cfg.train.weight_spectral, dtype=tf.float32, trainable=False
+        )
+        self.w_kl = tf.Variable(
+            self.cfg.train.weight_kl, dtype=tf.float32, trainable=False
+        )
 
         # Trackers
         self.g_loss_tracker = tf.keras.metrics.Mean(name="g_loss")
@@ -65,8 +83,12 @@ class SPADEGANTrainer(tf.keras.Model):
     @property
     def metrics(self):
         return [
-            self.g_loss_tracker, self.d_loss_tracker, self.l1_tracker,
-            self.gan_tracker, self.perc_tracker, self.spec_tracker
+            self.g_loss_tracker,
+            self.d_loss_tracker,
+            self.l1_tracker,
+            self.gan_tracker,
+            self.perc_tracker,
+            self.spec_tracker,
         ] + self.extra_metrics
 
     def train_step(self, data):
@@ -90,8 +112,9 @@ class SPADEGANTrainer(tf.keras.Model):
             d_fake_logits = tf.cast(d_fake_logits, tf.float32)
 
             # Hinge Loss
-            d_loss = tf.reduce_mean(tf.nn.relu(1.0 - d_real_logits)) + \
-                     tf.reduce_mean(tf.nn.relu(1.0 + d_fake_logits))
+            d_loss = tf.reduce_mean(
+                tf.nn.relu(1.0 - d_real_logits)
+            ) + tf.reduce_mean(tf.nn.relu(1.0 + d_fake_logits))
 
             # Loss scaling for Mixed Precision (if using standard Optimizer.minimize it's auto,
             # but with manual GradientTape we often need explicit scaling if not handled by optimizer wrapper)
@@ -107,7 +130,9 @@ class SPADEGANTrainer(tf.keras.Model):
         with tf.GradientTape() as tape:
             fake_img = self.generator(x, training=True)
             d_fake_out = self.discriminator([fake_img, x], training=False)
-            d_real_out = self.discriminator([real_img, x], training=False) # get real features too
+            d_real_out = self.discriminator(
+                [real_img, x], training=False
+            )  # get real features too
 
             d_fake_logits = d_fake_out[0]
 
@@ -142,11 +167,11 @@ class SPADEGANTrainer(tf.keras.Model):
             # Total
             # --- FIX: Multiply by dynamic TF Variables instead of cfg floats ---
             total_g_loss = (
-                (g_gan_loss * self.w_gan) +
-                (g_fm_loss * self.w_fm) +
-                (g_l1_loss * self.w_l1) +
-                (g_perc_loss * self.w_perc) +
-                (g_spec_loss * self.w_spec)
+                (g_gan_loss * self.w_gan)
+                + (g_fm_loss * self.w_fm)
+                + (g_l1_loss * self.w_l1)
+                + (g_perc_loss * self.w_perc)
+                + (g_spec_loss * self.w_spec)
             )
 
             # FIX: Add Model Internal Losses (KL Divergence)
@@ -155,10 +180,12 @@ class SPADEGANTrainer(tf.keras.Model):
                 kl_loss_sum = tf.reduce_sum(self.generator.losses)
                 # total_g_loss += kl_loss_sum
                 # Multiply KL by dynamic weight
-                total_g_loss += (kl_loss_sum * self.w_kl)
+                total_g_loss += kl_loss_sum * self.w_kl
 
                 # Optional: Track it
-                self.kl_tracker.update_state(kl_loss_sum) # (if there is a tracker)
+                self.kl_tracker.update_state(
+                    kl_loss_sum
+                )  # (if there is a tracker)
 
         g_grads = tape.gradient(total_g_loss, self.generator.trainable_weights)
         self.g_optimizer.apply_gradients(
@@ -202,8 +229,16 @@ class SPADEGANTrainer(tf.keras.Model):
 
 
 class Trainer:
-    def __init__(self, config: Config, model, train_ds, val_ds, data_manager,
-                 train_steps=None, val_steps=None):
+    def __init__(
+        self,
+        config: Config,
+        model,
+        train_ds,
+        val_ds,
+        data_manager,
+        train_steps=None,
+        val_steps=None,
+    ):
         self.cfg = config
         self.model = model
         self.train_ds = train_ds
@@ -220,8 +255,11 @@ class Trainer:
         # Only add visualizer if we are NOT in batch mode (saves massive time and RAM)
         if not self.cfg.batch_mode:
             callbacks_list.append(
-                TrainingVisualizer(self.val_ds, self.cfg,
-                                   frequency=max(1, self.cfg.train.epochs // 5))
+                TrainingVisualizer(
+                    self.val_ds,
+                    self.cfg,
+                    frequency=max(1, self.cfg.train.epochs // 5),
+                )
             )
         # Only attach the heavy Buffer callback if hallucination is actually enabled!
         if self.cfg.aug.prob_hallucination_max > 0.0:
@@ -232,7 +270,7 @@ class Trainer:
             )
 
         # LOGIC SWITCH: Check both Architecture AND Training Mode
-        is_spade_arch = (self.cfg.model.architecture in ['spade', 'vae'])
+        is_spade_arch = self.cfg.model.architecture in ['spade', 'vae']
         is_gan_mode = self.cfg.train.gan_mode
 
         if is_gan_mode and is_spade_arch:
@@ -245,20 +283,26 @@ class Trainer:
                     f"{self.cfg.model.name}_best.keras",
                     monitor='val_l1_loss',
                     save_best_only=True,
-                    mode='min'
+                    mode='min',
                 )
             )
 
             # 1. Build Discriminator
             # Input shape: Image (1ch) + Condition (N+Mask ch)
             img_shape = (*self.cfg.data.padded_size, 1)
-            cond_shape = (*self.cfg.data.padded_size, self.cfg.model.input_channels)
+            cond_shape = (
+                *self.cfg.data.padded_size,
+                self.cfg.model.input_channels,
+            )
 
             # Note: DiscriminatorBuilder must be defined in Cell 8
             # --- FIX: Only build and compile the GAN wrappers if compiling! ---
             if compile_model:
                 img_shape = (*self.cfg.data.padded_size, 1)
-                cond_shape = (*self.cfg.data.padded_size, self.cfg.model.input_channels)
+                cond_shape = (
+                    *self.cfg.data.padded_size,
+                    self.cfg.model.input_channels,
+                )
 
                 # Build Discriminator
                 d_model = DiscriminatorBuilder.build(img_shape, cond_shape)
@@ -267,8 +311,9 @@ class Trainer:
                 clean_metrics = []
 
                 # Wrap in GAN Trainer
-                gan_model = SPADEGANTrainer(self.model, d_model, self.cfg,
-                                            extra_metrics=clean_metrics)
+                gan_model = SPADEGANTrainer(
+                    self.model, d_model, self.cfg, extra_metrics=clean_metrics
+                )
 
                 gan_model.compile(
                     g_optimizer=tf.keras.optimizers.Adam(
@@ -277,7 +322,7 @@ class Trainer:
                     d_optimizer=tf.keras.optimizers.Adam(
                         learning_rate=self.cfg.train.learning_rate_d, beta_1=0.5
                     ),
-                    metrics=extra_metrics
+                    metrics=extra_metrics,
                 )
                 # Replace self.model with the GAN wrapper so .fit() works
                 self.model = gan_model
@@ -302,7 +347,9 @@ class Trainer:
             # REGRESSION MODE
             # Works for both 'unet' AND 'spade' (if gan_mode=False)
             arch_name = self.cfg.model.architecture.upper()
-            logger.info(f">>> Mode: Standard Regression Training ({arch_name} Generator)")
+            logger.info(
+                f">>> Mode: Standard Regression Training ({arch_name} Generator)"
+            )
 
             # Callbacking
             callbacks_list.append(
@@ -313,7 +360,7 @@ class Trainer:
                     monitor='val_loss',
                     # If SPADE, we track l1_loss. If Regression, we track total loss
                     # monitor='val_l1_loss' if is_spade_arch else 'val_loss',
-                    save_weights_only=False # we want to save full model
+                    save_weights_only=False,  # we want to save full model
                 ),
             )
 
@@ -327,7 +374,7 @@ class Trainer:
                     loss_fn = RelaxedMHPLossWrapper(
                         base_loss_fn=VanillaL1Loss(),
                         num_hypotheses=self.cfg.model.num_hypotheses,
-                        epsilon=self.cfg.model.mhp_epsilon
+                        epsilon=self.cfg.model.mhp_epsilon,
                     )
                 elif self.cfg.train.use_spatial_loss:
                     loss_fn = SpatiallyWeightedL1Loss(self.cfg)
@@ -337,19 +384,20 @@ class Trainer:
                     loss_fn = RelaxedMHPLossWrapper(
                         base_loss_fn=CompositeLoss(self.cfg),
                         num_hypotheses=self.cfg.model.num_hypotheses,
-                        epsilon=self.cfg.model.mhp_epsilon
+                        epsilon=self.cfg.model.mhp_epsilon,
                     )
                 metrics = [
                     # 'mae', 'mse', SSIMMetric(), PSNRMetric(),
                     # GradientSharpnessMetric()
-                    OracleMAE(), # OracleMAEMetric(),
-                    OracleMSE(), # OracleMSEMetric(),
-                    OracleSSIM(), # SSIMMetric(),
-                    OraclePSNR(), # PSNRMetric(),
-                    GradientSharpnessMetric()
+                    OracleMAE(),  # OracleMAEMetric(),
+                    OracleMSE(),  # OracleMSEMetric(),
+                    OracleSSIM(),  # SSIMMetric(),
+                    OraclePSNR(),  # PSNRMetric(),
+                    GradientSharpnessMetric(),
                 ]
-                self.model.compile(optimizer=optimizer, loss=loss_fn,
-                                   metrics=metrics)
+                self.model.compile(
+                    optimizer=optimizer, loss=loss_fn, metrics=metrics
+                )
 
             history = self.model.fit(
                 self.train_ds,

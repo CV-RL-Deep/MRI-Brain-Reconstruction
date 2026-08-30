@@ -6,7 +6,7 @@ import numpy as np
 
 from scipy.ndimage import gaussian_filter, zoom, rotate
 
-from configs.config import AugmentationConfig
+from ..config import AugmentationConfig
 
 
 class AugmentationLogic:
@@ -14,6 +14,7 @@ class AugmentationLogic:
     Fast NumPy/SciPy implementations for CPU-based Data Generators.
     Eliminates TF-Eager execution overhead during data loading.
     """
+
     @staticmethod
     def apply_geometric(input_stack, target_slice, target_masks, config):
         """
@@ -34,29 +35,50 @@ class AugmentationLogic:
             angle = random.uniform(-config.rotate_range, config.rotate_range)
 
             # Rotate Input (C, H, W) - Rotate axes 1, 2
-            input_stack = rotate(input_stack, angle, axes=(1, 2), reshape=False,
-                                 order=1, mode='constant', cval=0.0)
+            input_stack = rotate(
+                input_stack,
+                angle,
+                axes=(1, 2),
+                reshape=False,
+                order=1,
+                mode='constant',
+                cval=0.0,
+            )
 
             # Rotate Target (H, W) - Standard
-            target_slice = rotate(target_slice, angle, axes=(0, 1), reshape=False,
-                                  order=1, mode='constant', cval=0.0)
+            target_slice = rotate(
+                target_slice,
+                angle,
+                axes=(0, 1),
+                reshape=False,
+                order=1,
+                mode='constant',
+                cval=0.0,
+            )
 
             # Rotate Masks (H, W) - Nearest Neighbor
             target_masks = [
-                rotate(m, angle, axes=(0, 1), reshape=False, order=0,
-                       mode='constant', cval=0.0)
+                rotate(
+                    m,
+                    angle,
+                    axes=(0, 1),
+                    reshape=False,
+                    order=0,
+                    mode='constant',
+                    cval=0.0,
+                )
                 for m in target_masks
             ]
 
         return input_stack, target_slice, target_masks
 
     @staticmethod
-    def apply_autoregressive_corruption(input_stack: np.ndarray,
-                                        config: AugmentationConfig
-                                       ) -> Tuple[np.ndarray, Dict[str, bool]]:
+    def apply_autoregressive_corruption(
+        input_stack: np.ndarray, config: AugmentationConfig
+    ) -> Tuple[np.ndarray, Dict[str, bool]]:
         stack = input_stack.copy()
         flags = {'blur_applied': False, 'noise_applied': False}
-        num_slices = stack.shape[0] # [t-N ... t-1]
+        num_slices = stack.shape[0]  # [t-N ... t-1]
 
         # Decide if the SEQUENCE is corrupted starting from the most recent
         # We iterate backwards: t-1 -> t-N
@@ -67,12 +89,11 @@ class AugmentationLogic:
         if random.random() < config.prob_autoregressive_candidate:
             current_mode = random.choice(['blur', 'noise', 'both'])
         else:
-            return stack, flags # clean sequence
+            return stack, flags  # clean sequence
 
         # Apply cascade
         # Slice index: num_slices-1 is t-1
         for i in range(num_slices - 1, -1, -1):
-
             # Apply current mode
             slice_data = stack[i]
 
@@ -81,7 +102,9 @@ class AugmentationLogic:
             apply_noise = (current_mode == 'noise') or (current_mode == 'both')
 
             if apply_blur:
-                slice_data = gaussian_filter(slice_data, sigma=config.blur_sigma)
+                slice_data = gaussian_filter(
+                    slice_data, sigma=config.blur_sigma
+                )
                 flags['blur_applied'] = True
 
             if apply_noise:
@@ -105,30 +128,31 @@ class AugmentationLogic:
         return stack, flags
 
     @staticmethod
-    def apply_tumor_void(input_stack: np.ndarray,
-                         manager: Any, # changed type hint
-                         brats_files: list,
-                         config: AugmentationConfig
-                        ) -> Tuple[np.ndarray, np.ndarray, bool]:
+    def apply_tumor_void(
+        input_stack: np.ndarray,
+        manager: Any,  # changed type hint
+        brats_files: list,
+        config: AugmentationConfig,
+    ) -> Tuple[np.ndarray, np.ndarray, bool]:
         """
         Injects a BraTS tumor mask as a void.
         Note: This is legacy logic used by Static Generator. Active Gen uses direct method below.
         """
         if not brats_files:
-             return input_stack, np.zeros_like(input_stack[0]), False
+            return input_stack, np.zeros_like(input_stack[0]), False
 
         # 1. Fetch Mask
         b_subj = random.choice(brats_files)
 
         # Check if manager is Active or Static/Legacy
         if hasattr(manager, 'get_brats_pair'):
-             _, seg_vol = manager.get_brats_pair(b_subj['t1'], b_subj['seg'])
+            _, seg_vol = manager.get_brats_pair(b_subj['t1'], b_subj['seg'])
         else:
-             # StaticLoader doesn't have get_brats_pair, it has get_volume('brats')
-             # But this method is designed for file-based access.
-             # If using StaticLoader, we should use apply_tumor_void_direct.
-             # This method is kept for compatibility if цу revert to file-based logic
-             return input_stack, np.zeros_like(input_stack[0]), False
+            # StaticLoader doesn't have get_brats_pair, it has get_volume('brats')
+            # But this method is designed for file-based access.
+            # If using StaticLoader, we should use apply_tumor_void_direct.
+            # This method is kept for compatibility if цу revert to file-based logic
+            return input_stack, np.zeros_like(input_stack[0]), False
 
         if seg_vol is None:
             return input_stack, np.zeros_like(input_stack[0]), False
@@ -153,11 +177,11 @@ class AugmentationLogic:
 
         # 4. Crop/Pad safety
         if seg_resized.shape[1:] != (h_in, w_in):
-             temp = np.zeros((z_input+1, h_in, w_in), dtype=seg_resized.dtype)
-             min_h = min(seg_resized.shape[1], h_in)
-             min_w = min(seg_resized.shape[2], w_in)
-             temp[:, :min_h, :min_w] = seg_resized[:, :min_h, :min_w]
-             seg_resized = temp
+            temp = np.zeros((z_input + 1, h_in, w_in), dtype=seg_resized.dtype)
+            min_h = min(seg_resized.shape[1], h_in)
+            min_w = min(seg_resized.shape[2], w_in)
+            temp[:, :min_h, :min_w] = seg_resized[:, :min_h, :min_w]
+            seg_resized = temp
 
         # 5. Masking
         input_seg = seg_resized[:z_input]
@@ -172,9 +196,11 @@ class AugmentationLogic:
         return input_stack, target_tumor_mask, True
 
     @staticmethod
-    def apply_tumor_void_direct(input_stack: np.ndarray,
-                                seg_stack: np.ndarray,
-                                config: AugmentationConfig):
+    def apply_tumor_void_direct(
+        input_stack: np.ndarray,
+        seg_stack: np.ndarray,
+        config: AugmentationConfig,
+    ):
         """
         Applies a pre-extracted N+1 segmentation stack as a void to the input stack.
         seg_stack shape: (N+1, H_seg, W_seg)
@@ -199,11 +225,11 @@ class AugmentationLogic:
 
         # 4. Safety padding/cropping to guarantee exact (N+1, H_in, W_in) shape
         if seg_resized.shape[1:] != (h_in, w_in):
-             temp = np.zeros((z_input + 1, h_in, w_in), dtype=seg_resized.dtype)
-             min_h = min(seg_resized.shape[1], h_in)
-             min_w = min(seg_resized.shape[2], w_in)
-             temp[:, :min_h, :min_w] = seg_resized[:, :min_h, :min_w]
-             seg_resized = temp
+            temp = np.zeros((z_input + 1, h_in, w_in), dtype=seg_resized.dtype)
+            min_h = min(seg_resized.shape[1], h_in)
+            min_w = min(seg_resized.shape[2], w_in)
+            temp[:, :min_h, :min_w] = seg_resized[:, :min_h, :min_w]
+            seg_resized = temp
 
         # 5. Split into Context (t-N ... t-1) and Target (t)
         input_seg = seg_resized[:z_input]
@@ -236,7 +262,9 @@ class AugmentationLogic:
         # -------------------------------------
 
         # 6. Apply the void
-        input_stack = input_stack.copy() # Only copy right before modifying to save RAM
+        input_stack = (
+            input_stack.copy()
+        )  # Only copy right before modifying to save RAM
         is_tumor = np.isin(input_seg, config.brats_labels_for_void)
         input_stack[is_tumor] = 0.0
 

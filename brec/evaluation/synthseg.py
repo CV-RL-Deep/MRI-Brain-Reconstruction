@@ -1,18 +1,16 @@
-import os
-import glob
 import gc
-
-import numpy as np
+import glob
+import os
 
 import nibabel as nib
+import numpy as np
 import pandas as pd
-
 import tensorflow as tf
 
 from tqdm import tqdm
 
-from brec.core.utils import logger
-from configs.config import Config
+from ..core.utils import logger
+from ..configs.config import Config
 
 
 class SynthSegEvaluator:
@@ -20,20 +18,30 @@ class SynthSegEvaluator:
     Orchestrates the downstream anatomical validation using SynthSeg.
     Operates on the saved .npy files from the ablation study.
     """
+
     def __init__(self, config: Config):
         self.results_dir = config.data.results_dir
-        self.nifti_dir = (os.path.join(self.results_dir, "nifti"))
-        self.seg_dir = (os.path.join(self.results_dir, "synthseg_masks"))
+        self.nifti_dir = os.path.join(self.results_dir, "nifti")
+        self.seg_dir = os.path.join(self.results_dir, "synthseg_masks")
 
         os.makedirs(self.nifti_dir, exist_ok=True)
         os.makedirs(self.seg_dir, exist_ok=True)
 
         # FreeSurfer / SynthSeg standard labels
         self.macro_regions = {
-            'Ventricles': [4, 43], # Left/Right Lateral Ventricles
-            'Deep_GM':[10, 49, 11, 50, 12, 51, 13, 52], # Thalamus, Caudate, Putamen, Pallidum
-            'White_Matter': [2, 41], # Cerebral White Matter
-            'Cortex': [3, 42] # Cerebral Cortex
+            'Ventricles': [4, 43],  # Left/Right Lateral Ventricles
+            'Deep_GM': [
+                10,
+                49,
+                11,
+                50,
+                12,
+                51,
+                13,
+                52,
+            ],  # Thalamus, Caudate, Putamen, Pallidum
+            'White_Matter': [2, 41],  # Cerebral White Matter
+            'Cortex': [3, 42],  # Cerebral Cortex
         }
 
     def setup(self):
@@ -53,7 +61,7 @@ class SynthSegEvaluator:
 
         logger.info("Verifying SynthSeg model weights...")
         try:
-            get_model_dir() # This will download to user_cache_dir if missing
+            get_model_dir()  # This will download to user_cache_dir if missing
         except Exception as e:
             logger.error(f"Failed to download SynthSeg models: {e}")
             raise
@@ -65,14 +73,18 @@ class SynthSegEvaluator:
         # Only convert if NIfTI folder is empty
         nifti_files = glob.glob(os.path.join(self.nifti_dir, "*.nii.gz"))
         if len(nifti_files) > 0:
-            logger.info(f"NIfTI files already exist in {self.nifti_dir}. Skipping conversion.")
+            logger.info(
+                f"NIfTI files already exist in {self.nifti_dir}. Skipping conversion."
+            )
             return
 
         logger.info("Converting .npy volumes to .nii.gz...")
         npy_files = glob.glob(os.path.join(self.results_dir, "*.npy"))
 
         if not npy_files:
-            raise FileNotFoundError(f"No .npy files found in {self.results_dir}. Did you run the ablation study?")
+            raise FileNotFoundError(
+                f"No .npy files found in {self.results_dir}. Did you run the ablation study?"
+            )
 
         for f in tqdm(npy_files, desc="NIfTI Conversion"):
             vol = np.load(f)
@@ -95,32 +107,38 @@ class SynthSegEvaluator:
         # B. Now run the library call
         from SynthSeg.predict_synthseg import predict
         from SynthSeg.cli import get_model_dir
-        import SynthSeg # import the package to find its location
-        
+        import SynthSeg  # import the package to find its location
+
         # 1. Locate the package directory dynamically
         synthseg_pkg_path = os.path.dirname(os.path.dirname(SynthSeg.__file__))
-        
+
         # 2. Construct the labels path relative to the package location
         # Based on your find command, the labels are in src/SynthSeg/data/labels_classes_priors/
         labels_path = os.path.join(
-            synthseg_pkg_path, 
-            'SynthSeg', "data", "labels_classes_priors", 
-            "synthseg_segmentation_labels_2.0.npy"
+            synthseg_pkg_path,
+            'SynthSeg',
+            "data",
+            "labels_classes_priors",
+            "synthseg_segmentation_labels_2.0.npy",
         )
-        
+
         # 3. Locate the model
         model_dir = get_model_dir()
         path_model_seg = os.path.join(model_dir, 'synthseg_2.0.h5')
-        
+
         # if not os.path.exists(labels_path):
         #     raise FileNotFoundError(f"Labels file not found at {labels_path}. Check SynthSeg's data folder.")
         # 4. Verify
         if not os.path.exists(labels_path):
-            logger.warning(f"'{labels_path}' NOT FOUND! Falling back to './SynthSeg'...")
+            logger.warning(
+                f"'{labels_path}' NOT FOUND! Falling back to './SynthSeg'..."
+            )
             # Fallback: Check if it's in the cloned folder directly
             labels_path = "./SynthSeg/src/SynthSeg/data/labels_classes_priors/synthseg_segmentation_labels_2.0.npy"
             if not os.path.exists(labels_path):
-                raise FileNotFoundError(f"Could not locate labels at {labels_path}")
+                raise FileNotFoundError(
+                    f"Could not locate labels at {labels_path}"
+                )
         else:
             logger.info(f"Using '{labels_path}' as labels path.")
 
@@ -135,9 +153,10 @@ class SynthSegEvaluator:
             robust=False,
             fast=True,
             v1=False,
-            n_neutral_labels=None, # 19
-            labels_denoiser=os.path.join(os.path.dirname(labels_path),
-                                         'synthseg_denoiser_labels_2.0.npy'),
+            n_neutral_labels=None,  # 19
+            labels_denoiser=os.path.join(
+                os.path.dirname(labels_path), 'synthseg_denoiser_labels_2.0.npy'
+            ),
             path_posteriors=None,
             path_resampled=None,
             path_volumes=None,
@@ -147,7 +166,7 @@ class SynthSegEvaluator:
             path_qc_scores=None,
             path_model_qc=None,
             labels_qc=None,
-            cropping=None
+            cropping=None,
         )
 
         logger.info("SynthSeg prediction complete!")
@@ -156,7 +175,8 @@ class SynthSegEvaluator:
         intersection = np.sum(mask1 & mask2)
         vol1 = np.sum(mask1)
         vol2 = np.sum(mask2)
-        if vol1 + vol2 == 0: return 1.0
+        if vol1 + vol2 == 0:
+            return 1.0
         return float(2.0 * intersection / (vol1 + vol2))
 
     def calculate_dsc(self):
@@ -165,18 +185,31 @@ class SynthSegEvaluator:
 
         # Find all Ground Truth segmentations
         gt_files = glob.glob(os.path.join(self.seg_dir, "gt_*.nii.gz"))
-        ablations =['baseline', 'spade', 'buffer', 'full', 'ours_full_masked',
-                    'monai_3d_ldm', 'monai_2d_ldm', 'monai_vqgan']
+        ablations = [
+            'baseline',
+            'spade',
+            'buffer',
+            'full',
+            'ours_full_masked',
+            'monai_3d_ldm',
+            'monai_2d_ldm',
+            'monai_vqgan',
+        ]
 
-        results =[]
+        results = []
 
         for gt_path in tqdm(gt_files, desc="Scoring Volumes"):
-            vol_id = os.path.basename(gt_path).replace('gt_', '').replace('.nii.gz', '')
+            vol_id = (
+                os.path.basename(gt_path)
+                .replace('gt_', '')
+                .replace('.nii.gz', '')
+            )
             gt_seg = nib.load(gt_path).get_fdata()
 
             for ab in ablations:
                 pred_path = os.path.join(self.seg_dir, f"{ab}_{vol_id}.nii.gz")
-                if not os.path.exists(pred_path): continue
+                if not os.path.exists(pred_path):
+                    continue
 
                 pred_seg = nib.load(pred_path).get_fdata()
 
@@ -187,12 +220,14 @@ class SynthSegEvaluator:
 
                     dsc = self._dice_coef(gt_mask, pred_mask)
 
-                    results.append({
-                        'Volume_ID': vol_id,
-                        'Ablation': ab,
-                        'Region': region_name.replace('_', ' '),
-                        'DSC': dsc
-                    })
+                    results.append(
+                        {
+                            'Volume_ID': vol_id,
+                            'Ablation': ab,
+                            'Region': region_name.replace('_', ' '),
+                            'DSC': dsc,
+                        }
+                    )
 
         df = pd.DataFrame(results)
         csv_path = os.path.join(self.results_dir, "anatomical_metrics.csv")

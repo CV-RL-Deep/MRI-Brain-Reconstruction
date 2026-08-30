@@ -1,23 +1,26 @@
-import os
 import glob
+import os
 import re
 
 from typing import List, Dict, Tuple
 
-from tqdm import tqdm
-
 import nibabel as nib
 
-from brec.core.utils import logger
+from tqdm import tqdm
+
+from ..core.utils import logger
 
 
 # Constants for file filtering (from original script)
-EXCLUDE_FILES = set([
-    'wmIXI338-HH-1971-MADisoTFE1_-s3T188_-0301-00003-000001-01.nii',
-    'wmIXI357-HH-2076-MADisoTFE1_-s3T199_-0301-00003-000001-01.nii',
-    'wmIXI402-Guys-0961-MPRAGESEN_-s413_-0301-00003-000001-01.nii',
-    'wmIXI423-IOP-0974-SAGFSPGR_-sIXI00_-0003-00001-000001-01.nii',
-])
+EXCLUDE_FILES = set(
+    [
+        'wmIXI338-HH-1971-MADisoTFE1_-s3T188_-0301-00003-000001-01.nii',
+        'wmIXI357-HH-2076-MADisoTFE1_-s3T199_-0301-00003-000001-01.nii',
+        'wmIXI402-Guys-0961-MPRAGESEN_-s413_-0301-00003-000001-01.nii',
+        'wmIXI423-IOP-0974-SAGFSPGR_-sIXI00_-0003-00001-000001-01.nii',
+    ]
+)
+
 
 def get_subject_id_from_path(path: str) -> str:
     """Extracts subject ID (e.g., IXI306) from filename."""
@@ -27,6 +30,7 @@ def get_subject_id_from_path(path: str) -> str:
         return match.group(0)
     return filename
 
+
 def find_t1_files(root: str) -> List[str]:
     """Recursive search for wm*.nii files (IXI/OASIS)."""
     # Pattern matches the Kaggle 'RawT1' pattern from your original script
@@ -34,12 +38,14 @@ def find_t1_files(root: str) -> List[str]:
     matches = glob.glob(pattern, recursive=True)
 
     valid_matches = [
-        p for p in matches
+        p
+        for p in matches
         if os.path.getsize(p) > 1024
         and os.path.basename(p) not in EXCLUDE_FILES
     ]
     logger.info(f"Found {len(valid_matches)} valid T1 volumes in {root}")
     return sorted(valid_matches)
+
 
 def get_brats_subjects(root: str) -> List[Dict]:
     """Scans BraTS directory for T1/Seg pairs."""
@@ -48,7 +54,8 @@ def get_brats_subjects(root: str) -> List[Dict]:
     t1_files = glob.glob(os.path.join(root, '**', '*_t1.nii'), recursive=True)
 
     for t1_path in sorted(t1_files):
-        if os.path.getsize(t1_path) <= 1024: continue
+        if os.path.getsize(t1_path) <= 1024:
+            continue
 
         folder = os.path.dirname(t1_path)
         subject_id = os.path.basename(t1_path).replace('_t1.nii', '')
@@ -61,17 +68,15 @@ def get_brats_subjects(root: str) -> List[Dict]:
             alts = glob.glob(os.path.join(folder, '*seg*.nii'))
             seg_path = alts[0] if alts else None
 
-        subjects.append({
-            'id': subject_id,
-            't1': t1_path,
-            'seg': seg_path
-        })
+        subjects.append({'id': subject_id, 't1': t1_path, 'seg': seg_path})
 
     logger.info(f"Found {len(subjects)} BraTS subjects in {root}")
     return subjects
 
-def make_slice_index_list(vol_paths: List[str], neighborhood: int = 3,
-                          batch_mode=False) -> List[Tuple[str, int, str]]:
+
+def make_slice_index_list(
+    vol_paths: List[str], neighborhood: int = 3, batch_mode=False
+) -> List[Tuple[str, int, str]]:
     """
     Scans headers to build a list of valid (Volume, SliceIndex, Direction) samples.
     """
@@ -88,13 +93,13 @@ def make_slice_index_list(vol_paths: List[str], neighborhood: int = 3,
             shape = img.shape
 
             # Replicate DataManager heuristic to find Z dimension size
-            z_dim = shape[2] # Default NIfTI
+            z_dim = shape[2]  # Default NIfTI
             if len(shape) == 3 and shape[2] < shape[0] and shape[2] < 128:
-                z_dim = shape[2] # Z is last (standard)
+                z_dim = shape[2]  # Z is last (standard)
             elif shape[0] < 128:
-                z_dim = shape[0] # Z is first
+                z_dim = shape[0]  # Z is first
             else:
-                z_dim = shape[2] # Fallback
+                z_dim = shape[2]  # Fallback
 
         except Exception as e:
             logger.warning(f"Skipping {os.path.basename(p)}: {e}")

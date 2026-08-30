@@ -9,22 +9,16 @@ import psutil
 import subprocess
 import csv
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field, asdict
 from platform import python_version
-from typing import Tuple, List, Optional, Union, Any, Dict
 
-import nibabel as nib
 import numpy as np
 import tensorflow as tf
-import tensorflow.keras.backend as K
 
-from scipy.ndimage import find_objects
 from tensorflow.keras import mixed_precision
 
 import torch
 
-from brec.core.env import KAGGLE
+from .env import KAGGLE
 
 
 # --- Robust Logging Configuration ---
@@ -36,8 +30,9 @@ def setup_logger():
     # Check if handlers already exist to avoid duplicate logs
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s',
-                                      datefmt='%H:%M:%S')
+        formatter = logging.Formatter(
+            '[%(asctime)s] %(levelname)s: %(message)s', datefmt='%H:%M:%S'
+        )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
@@ -47,14 +42,17 @@ def setup_logger():
 
     return logger
 
+
 logger = setup_logger()
 
 # --- Profiling / Debugging Utilities ---
+
 
 class PipelineTimer:
     """
     A context manager to measure execution time of code blocks.
     """
+
     def __init__(self, name: str, active: bool = True):
         self.name = name
         self.active = active
@@ -66,9 +64,11 @@ class PipelineTimer:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.active:
-            duration = (time.perf_counter() - self.start) # sec # * 1000  # ms
+            duration = time.perf_counter() - self.start  # sec # * 1000  # ms
             if duration > 1.0:
-                 logger.info(f"⏱️ {self.name}: {duration:.2f} sec") # changed debug->info to ensure visibility
+                logger.info(
+                    f"⏱️ {self.name}: {duration:.2f} sec"
+                )  # changed debug->info to ensure visibility
 
 
 class InferenceProfiler:
@@ -76,6 +76,7 @@ class InferenceProfiler:
     Tracks Execution Time and Peak VRAM during Inference for Pareto plotting.
     Supports both TensorFlow and PyTorch backends.
     """
+
     def __init__(self, model_name: str, results_dir: str):
         self.model_name = model_name
         self.results_dir = results_dir
@@ -86,7 +87,9 @@ class InferenceProfiler:
         if not os.path.exists(self.csv_path):
             with open(self.csv_path, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['Model', 'Volume_ID', 'Time_Seconds', 'Peak_VRAM_GB'])
+                writer.writerow(
+                    ['Model', 'Volume_ID', 'Time_Seconds', 'Peak_VRAM_GB']
+                )
 
     def start(self):
         # Reset Peak Memory Stats
@@ -94,7 +97,8 @@ class InferenceProfiler:
             torch.cuda.reset_peak_memory_stats()
         try:
             tf.config.experimental.reset_memory_stats('GPU:0')
-        except: pass
+        except:
+            pass
 
         self.start_time = time.perf_counter()
 
@@ -114,13 +118,18 @@ class InferenceProfiler:
             tf_info = tf.config.experimental.get_memory_info('GPU:0')
             tf_vram = tf_info['peak'] / (1024**3)
             vram_gb = max(vram_gb, tf_vram)
-        except: pass
+        except:
+            pass
 
         with open(self.csv_path, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([self.model_name, vol_id, f"{elapsed:.2f}", f"{vram_gb:.2f}"])
+            writer.writerow(
+                [self.model_name, vol_id, f"{elapsed:.2f}", f"{vram_gb:.2f}"]
+            )
 
-        logger.info(f"[{self.model_name}] {vol_id} -> Time: {elapsed:.1f}s | Peak VRAM: {vram_gb:.2f}GB")
+        logger.info(
+            f"[{self.model_name}] {vol_id} -> Time: {elapsed:.1f}s | Peak VRAM: {vram_gb:.2f}GB"
+        )
 
 
 class MemoryTelemetry:
@@ -134,19 +143,23 @@ class MemoryTelemetry:
 
     def log(self, event: str, trial_num: int):
         # 1. System RAM (GB)
-        ram_gb = psutil.virtual_memory().used / (1024 ** 3)
+        ram_gb = psutil.virtual_memory().used / (1024**3)
 
         # 2. GPU VRAM (GB)
         try:
             result = subprocess.check_output(
-                ['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader'],
-                encoding='utf-8'
+                [
+                    'nvidia-smi',
+                    '--query-gpu=memory.used',
+                    '--format=csv,nounits,noheader',
+                ],
+                encoding='utf-8',
             )
             # Sum VRAM across all GPUs (if multiple exist)
             vram_mb = sum(int(x.strip()) for x in result.strip().split('\n'))
             vram_gb = vram_mb / 1024.0
         except Exception:
-            vram_mb = -1 # fallback if nvidia-smi fails
+            vram_mb = -1  # fallback if nvidia-smi fails
             vram_gb = -1
 
         with open(self.filename, 'a', newline='') as f:
@@ -162,7 +175,9 @@ def enforce_gpu_presence():
             "🚨 FATAL: No GPUs detected by TensorFlow! "
             "Aborting execution to prevent a massive waste of time on CPU."
         )
-    logger.info(f"✅ Hardware Protection Pass: Verified {len(gpus)} GPU(s) available.")
+    logger.info(
+        f"✅ Hardware Protection Pass: Verified {len(gpus)} GPU(s) available."
+    )
 
 
 def set_global_seeds(seed: int = 42, use_fp16=False, use_dmem=False):

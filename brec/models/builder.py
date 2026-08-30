@@ -3,10 +3,15 @@ import tensorflow.keras.backend as K
 
 from tensorflow.keras import layers, models, applications
 
-from brec.models.layers import (SpectralNormalization, Sampling, VAELossLayer,
-                               InstanceNormalization, FourierEmbedding,
-                               SPADEResBlock)
-from configs.config import Config
+from ..configs.config import Config
+from ..models.layers import (
+    SpectralNormalization,
+    Sampling,
+    VAELossLayer,
+    InstanceNormalization,
+    FourierEmbedding,
+    SPADEResBlock,
+)
 
 
 class DiscriminatorBuilder:
@@ -15,6 +20,7 @@ class DiscriminatorBuilder:
     Input: [Reconstructed_Image, Condition_Stack]
     Output: Patch Map of Real/Fake scores.
     """
+
     @staticmethod
     def build(input_shape, condition_shape, base_filters=64):
         img_input = layers.Input(shape=input_shape, name='img_input')
@@ -29,8 +35,9 @@ class DiscriminatorBuilder:
         # C64
         # x = layers.Conv2D(base_filters, 4, strides=2, padding='same')(x)
         # x = layers.LeakyReLU(0.2)(x)
-        x = SpectralNormalization(layers.Conv2D(base_filters, 4, strides=2,
-                                                padding='same'))(x)
+        x = SpectralNormalization(
+            layers.Conv2D(base_filters, 4, strides=2, padding='same')
+        )(x)
         x = layers.LeakyReLU(0.2)(x)
         features.append(x)
 
@@ -38,8 +45,9 @@ class DiscriminatorBuilder:
         # x = layers.Conv2D(base_filters*2, 4, strides=2, padding='same')(x)
         # x = layers.GroupNormalization(groups=-1)(x)
         # x = layers.LeakyReLU(0.2)(x)
-        x = SpectralNormalization(layers.Conv2D(base_filters*2, 4, strides=2,
-                                                padding='same'))(x)
+        x = SpectralNormalization(
+            layers.Conv2D(base_filters * 2, 4, strides=2, padding='same')
+        )(x)
         x = InstanceNormalization()(x)
         x = layers.LeakyReLU(0.2)(x)
         features.append(x)
@@ -48,8 +56,9 @@ class DiscriminatorBuilder:
         # x = layers.Conv2D(base_filters*4, 4, strides=2, padding='same')(x)
         # x = layers.GroupNormalization(groups=-1)(x)
         # x = layers.LeakyReLU(0.2)(x)
-        x = SpectralNormalization(layers.Conv2D(base_filters*4, 4, strides=2,
-                                                padding='same'))(x)
+        x = SpectralNormalization(
+            layers.Conv2D(base_filters * 4, 4, strides=2, padding='same')
+        )(x)
         x = InstanceNormalization()(x)
         x = layers.LeakyReLU(0.2)(x)
         features.append(x)
@@ -58,8 +67,9 @@ class DiscriminatorBuilder:
         # x = layers.Conv2D(base_filters*8, 4, strides=1, padding='same')(x)
         # x = layers.GroupNormalization(groups=-1)(x)
         # x = layers.LeakyReLU(0.2)(x)
-        x = SpectralNormalization(layers.Conv2D(base_filters*8, 4, strides=1,
-                                                padding='same'))(x)
+        x = SpectralNormalization(
+            layers.Conv2D(base_filters * 8, 4, strides=1, padding='same')
+        )(x)
         x = InstanceNormalization()(x)
         x = layers.LeakyReLU(0.2)(x)
         features.append(x)
@@ -67,8 +77,9 @@ class DiscriminatorBuilder:
         # Output Map (1 channel)
         outputs = layers.Conv2D(1, 4, strides=1, padding='same')(x)
 
-        return models.Model([img_input, cond_input], [outputs] + features,
-                            name="discriminator")
+        return models.Model(
+            [img_input, cond_input], [outputs] + features, name="discriminator"
+        )
 
 
 class ModelBuilder:
@@ -77,6 +88,7 @@ class ModelBuilder:
     Currently supports: U-Net (Custom & EfficientNet backbones).
     Future support: VAE, GAN.
     """
+
     @staticmethod
     def build(config: Config):
         arch = config.model.architecture.lower()
@@ -96,13 +108,15 @@ class ModelBuilder:
     def conv_block(x, filters, activation='gelu'):
         x = layers.BatchNormalization()(x)
         x = layers.Activation(activation)(x)
-        x = layers.Conv2D(filters, 3, padding='same',
-                          kernel_initializer='he_normal')(x)
+        x = layers.Conv2D(
+            filters, 3, padding='same', kernel_initializer='he_normal'
+        )(x)
 
         x = layers.BatchNormalization()(x)
         x = layers.Activation(activation)(x)
-        x = layers.Conv2D(filters, 3, padding='same',
-                          kernel_initializer='he_normal')(x)
+        x = layers.Conv2D(
+            filters, 3, padding='same', kernel_initializer='he_normal'
+        )(x)
         return x
 
     @staticmethod
@@ -130,8 +144,12 @@ class ModelBuilder:
 
         # x = layers.UpSampling2D((2, 2), interpolation='bilinear')(x)
         # x = layers.Conv2D(filters, 3, padding='same')(x) # adjust channels
-        x = layers.Conv2D(filters * 4, kernel_size=1, padding='same',
-                          kernel_initializer='he_normal')(x)
+        x = layers.Conv2D(
+            filters * 4,
+            kernel_size=1,
+            padding='same',
+            kernel_initializer='he_normal',
+        )(x)
         # PixelShuffle trick: tf.nn.depth_to_space
         x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(x)
 
@@ -154,31 +172,67 @@ class ModelBuilder:
         """Returns the model and the skip connection tensors."""
         # Map names to constructors
         ctors = {
-            'B0': applications.EfficientNetB0, 'B1': applications.EfficientNetB1,
-            'B2': applications.EfficientNetB2, 'B3': applications.EfficientNetB3,
-            'B4': applications.EfficientNetB4, 'B5': applications.EfficientNetB5,
-            'B6': applications.EfficientNetB6, 'B7': applications.EfficientNetB7,
+            'B0': applications.EfficientNetB0,
+            'B1': applications.EfficientNetB1,
+            'B2': applications.EfficientNetB2,
+            'B3': applications.EfficientNetB3,
+            'B4': applications.EfficientNetB4,
+            'B5': applications.EfficientNetB5,
+            'B6': applications.EfficientNetB6,
+            'B7': applications.EfficientNetB7,
         }
         # Standard EfficientNet naming convention for block activation layers
         # Key: Backbone Name -> List of layer names for [Skip 1/2, Skip 1/4, Skip 1/8, Skip 1/16]
         # Skip 1/32 comes from bridge output
         skip_names = {
-            'B0': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
-            'B1': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
-            'B2': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
-            'B3': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
-            'B4': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
-            'B5': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
-            'B6': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
-            'B7': ['block2a_expand_activation', 'block3a_expand_activation',
-                   'block4a_expand_activation', 'block6a_expand_activation'],
+            'B0': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
+            'B1': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
+            'B2': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
+            'B3': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
+            'B4': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
+            'B5': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
+            'B6': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
+            'B7': [
+                'block2a_expand_activation',
+                'block3a_expand_activation',
+                'block4a_expand_activation',
+                'block6a_expand_activation',
+            ],
         }
 
         # B0-B7 share similar early block naming for the expand activation.
@@ -193,14 +247,16 @@ class ModelBuilder:
             name=f"encoder_{backbone_name}",
             include_top=False,
             weights=None,
-            input_tensor=input_tensor
+            input_tensor=input_tensor,
         )
 
         try:
             skips = [base.get_layer(n).output for n in names]
         except ValueError as e:
             # Fallback for debugging if layer names shift in newer TF versions
-            print(f"Error finding skip layers for {backbone_name}. Available layers:")
+            print(
+                f"Error finding skip layers for {backbone_name}. Available layers:"
+            )
             raise e
         return base.output, skips
 
@@ -210,10 +266,12 @@ class ModelBuilder:
         N = config.data.neighborhood
 
         # 1. Inputs
-        history_input = layers.Input(shape=(*config.data.padded_size, N),
-                                     name='history_input')
-        mask_input = layers.Input(shape=(*config.data.padded_size, 1),
-                                  name='mask_input')
+        history_input = layers.Input(
+            shape=(*config.data.padded_size, N), name='history_input'
+        )
+        mask_input = layers.Input(
+            shape=(*config.data.padded_size, 1), name='mask_input'
+        )
 
         # p_rel_input = layers.Input(shape=(N,), name='p_rel_input')
         # p_abs_input = layers.Input(shape=(1,), name='p_abs_input')
@@ -230,8 +288,9 @@ class ModelBuilder:
         decoder_filters = [base_f * 8, base_f * 4, base_f * 2, base_f]
 
         if config.model.backbone:
-            bridge, skips = ModelBuilder.get_efficientnet_encoder(history_input,
-                                                                  config.model.backbone)
+            bridge, skips = ModelBuilder.get_efficientnet_encoder(
+                history_input, config.model.backbone
+            )
         else:
             s1 = ModelBuilder.conv_block(history_input, base_f)
             p1 = layers.MaxPooling2D()(s1)
@@ -279,15 +338,21 @@ class ModelBuilder:
         # --- THE CONDITIONAL POSITIONAL PIPELINE ---
         if config.model.use_positional_encoding:
             # Glue input (N) and target (1) absolute positions into a single vector
-            p_combined = layers.Concatenate(axis=-1)([p_history_input, p_abs_input])
+            p_combined = layers.Concatenate(axis=-1)(
+                [p_history_input, p_abs_input]
+            )
             fourier_feats = FourierEmbedding(num_freqs=8)(p_combined)
 
             bridge_channels = K.int_shape(bridge)[-1]
-            emb = layers.Dense(256, activation='swish', name='pos_mlp_hidden')(fourier_feats)
-            emb = layers.Dense(bridge_channels,
-                               kernel_initializer='zeros',
-                               bias_initializer='zeros',
-                               name='pos_mlp_out')(emb)
+            emb = layers.Dense(256, activation='swish', name='pos_mlp_hidden')(
+                fourier_feats
+            )
+            emb = layers.Dense(
+                bridge_channels,
+                kernel_initializer='zeros',
+                bias_initializer='zeros',
+                name='pos_mlp_out',
+            )(emb)
 
             emb_spatial = layers.Reshape((1, 1, bridge_channels))(emb)
             x = layers.Add(name='bottleneck_pos_add')([bridge, emb_spatial])
@@ -301,7 +366,9 @@ class ModelBuilder:
             filters = decoder_filters[i] if i < len(decoder_filters) else base_f
 
             x = layers.Conv2D(filters * 4, 1, padding='same')(x)
-            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(x)
+            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(
+                x
+            )
 
             # if skip is not None:
             #     # 8. Skip Connection Injection (Relative Position)
@@ -320,26 +387,30 @@ class ModelBuilder:
         if config.model.backbone:
             current_channels = K.int_shape(x)[-1]
             x = layers.Conv2D(current_channels * 4, 1, padding='same')(x)
-            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(x)
+            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(
+                x
+            )
 
         # outputs = layers.Conv2D(1, 1, activation='sigmoid', name='reconstruction')(x)
         # Feature switch
         if config.model.num_hypotheses == 1:
-            outputs = layers.Conv2D(1, 1, activation='sigmoid', name='reconstruction')(x)
+            outputs = layers.Conv2D(
+                1, 1, activation='sigmoid', name='reconstruction'
+            )(x)
         else:
             # Outputs shape: (Batch, H, W, M)
             outputs = layers.Conv2D(
                 config.model.num_hypotheses,
                 1,
                 activation='sigmoid',
-                name='reconstruction_mhp'
+                name='reconstruction_mhp',
             )(x)
 
         # Return Multi-Input Model
         return models.Model(
             inputs=[history_input, mask_input, p_history_input, p_abs_input],
             outputs=outputs,
-            name=f"{arch}_{config.model.backbone}"
+            name=f"{arch}_{config.model.backbone}",
         )
 
     @staticmethod
@@ -353,8 +424,9 @@ class ModelBuilder:
         # img_input = layers.Input(shape=img_shape, name='history_input')
         # Input: [History (N) + Mask (1)]
         total_channels = config.model.input_channels
-        full_input = layers.Input(shape=(*config.data.padded_size, total_channels),
-                                  name='full_input')
+        full_input = layers.Input(
+            shape=(*config.data.padded_size, total_channels), name='full_input'
+        )
 
         # Split:
         # History: Channels [0 ... N-1]
@@ -369,22 +441,28 @@ class ModelBuilder:
         # Slicing using Lambda layers to support serialization
 
         # History (first N channels) -> Goes to Encoder
-        history_input = layers.Lambda(lambda x: x[..., :N], name='split_history')(full_input)
+        history_input = layers.Lambda(
+            lambda x: x[..., :N], name='split_history'
+        )(full_input)
 
         # Mask (last channel) -> Goes to SPADE
-        mask_input = layers.Lambda(lambda x: x[..., N:], name='split_mask')(full_input)
+        mask_input = layers.Lambda(lambda x: x[..., N:], name='split_mask')(
+            full_input
+        )
 
         base_f = config.model.base_filters
 
         # Encoder uses History
-        bridge, skips = ModelBuilder.get_efficientnet_encoder(history_input,
-                                                              config.model.backbone)
+        bridge, skips = ModelBuilder.get_efficientnet_encoder(
+            history_input, config.model.backbone
+        )
 
         # 2. Encoder (Processes History Images)
         if config.model.backbone:
             # bridge, skips = ModelBuilder.get_efficientnet_encoder(inputs, config.model.backbone)
-            bridge, skips = ModelBuilder.get_efficientnet_encoder(history_input,
-                                                                  config.model.backbone)
+            bridge, skips = ModelBuilder.get_efficientnet_encoder(
+                history_input, config.model.backbone
+            )
             # Decoder filters logic: scaling down from bridge
             # Bridge (B0=1280, B3=1536) -> 4 * base_f -> 2 * base_f -> ...
             decoder_filters = [base_f * 8, base_f * 4, base_f * 2, base_f]
@@ -413,8 +491,12 @@ class ModelBuilder:
         # We can reuse base_filters * 16 (e.g. 1024) or reduce it.
         latent_dim = bridge.shape[-1]
 
-        z_mean = layers.Conv2D(latent_dim, 1, padding='same', name='z_mean')(bridge)
-        z_log_var = layers.Conv2D(latent_dim, 1, padding='same', name='z_log_var')(bridge)
+        z_mean = layers.Conv2D(latent_dim, 1, padding='same', name='z_mean')(
+            bridge
+        )
+        z_log_var = layers.Conv2D(
+            latent_dim, 1, padding='same', name='z_log_var'
+        )(bridge)
 
         # 2. Re-parameterization Trick (Sampling)
         z = Sampling(name='z_sampling')([z_mean, z_log_var])
@@ -436,7 +518,9 @@ class ModelBuilder:
             # Use PixelShuffle
             # x = layers.Conv2D(x.shape[-1] * 4, 1, padding='same')(x)
             x = layers.Conv2D(filters * 4, 1, padding='same')(x)
-            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(x)
+            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(
+                x
+            )
 
             if skip is not None:
                 x = layers.Concatenate()([x, skip])
@@ -445,7 +529,7 @@ class ModelBuilder:
             # Input to SPADE is always the Raw Input Stack (inputs)
             # CRITICAL CHANGE:
             # SPADE Block conditioned on 'mask_input', NOT 'img_input'
-            x = SPADEResBlock(filters, 1)([x, mask_input]) # 1 channel mask
+            x = SPADEResBlock(filters, 1)([x, mask_input])  # 1 channel mask
 
         # Final
         if config.model.backbone:
@@ -454,11 +538,18 @@ class ModelBuilder:
             # Safe logic using K.int_shape
             current_channels = K.int_shape(x)[-1]
             x = layers.Conv2D(current_channels * 4, 1, padding='same')(x)
-            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(x)
+            x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(
+                x
+            )
 
-        outputs = layers.Conv2D(1, 1, activation='sigmoid', name='reconstruction')(x)
-        return models.Model(inputs=full_input, outputs=outputs,
-                            name=f"{arch}_{config.model.backbone}")
+        outputs = layers.Conv2D(
+            1, 1, activation='sigmoid', name='reconstruction'
+        )(x)
+        return models.Model(
+            inputs=full_input,
+            outputs=outputs,
+            name=f"{arch}_{config.model.backbone}",
+        )
         # return models.Model(inputs=full_input, outputs=outputs,
         #                     name=f"spade_vae_{config.model.backbone}")
 
@@ -473,8 +564,12 @@ class ModelBuilder:
         N = config.data.neighborhood
 
         # 1. Standardize Inputs to match the Data Pipeline (Dictionary format)
-        history_input = layers.Input(shape=(*config.data.padded_size, N), name='history_input')
-        mask_input = layers.Input(shape=(*config.data.padded_size, 1), name='mask_input')
+        history_input = layers.Input(
+            shape=(*config.data.padded_size, N), name='history_input'
+        )
+        mask_input = layers.Input(
+            shape=(*config.data.padded_size, 1), name='mask_input'
+        )
         p_history_input = layers.Input(shape=(N,), name='p_history_input')
         p_abs_input = layers.Input(shape=(1,), name='p_abs_input')
 
@@ -484,7 +579,7 @@ class ModelBuilder:
         else:
             x = history_input
 
-        inputs_list =[history_input, mask_input, p_history_input, p_abs_input]
+        inputs_list = [history_input, mask_input, p_history_input, p_abs_input]
 
         if config.model.use_stem:
             x = layers.Conv2D(32, 3, padding='same')(x)
@@ -492,7 +587,9 @@ class ModelBuilder:
             x = layers.Activation(config.model.activation)(x)
 
         if config.model.backbone:
-            bridge, skips = ModelBuilder.get_efficientnet_encoder(x, config.model.backbone)
+            bridge, skips = ModelBuilder.get_efficientnet_encoder(
+                x, config.model.backbone
+            )
             # Decoder filters logic: scaling down from bridge
             # B0 bridge is 1280.
             # We want to smooth the transition
@@ -514,23 +611,33 @@ class ModelBuilder:
         x = bridge
         for i, skip in enumerate(reversed(skips)):
             filters = decoder_filters[i] if i < len(decoder_filters) else 16
-            x = ModelBuilder.up_block(x, skip, filters, config.model.activation,
-                                      config.model.use_attention)
+            x = ModelBuilder.up_block(
+                x,
+                skip,
+                filters,
+                config.model.activation,
+                config.model.use_attention,
+            )
 
         if config.model.backbone:
-             x = layers.UpSampling2D((2,2), interpolation='bilinear')(x)
+            x = layers.UpSampling2D((2, 2), interpolation='bilinear')(x)
 
         # outputs = layers.Conv2D(1, 1, activation='sigmoid', name='reconstruction')(x)
         # 3. Feature switch to match output shapes across ablations
         if config.model.num_hypotheses == 1:
-            outputs = layers.Conv2D(1, 1, activation='sigmoid', name='reconstruction')(x)
+            outputs = layers.Conv2D(
+                1, 1, activation='sigmoid', name='reconstruction'
+            )(x)
         else:
             outputs = layers.Conv2D(
                 config.model.num_hypotheses,
                 1,
                 activation='sigmoid',
-                name='reconstruction_mhp'
+                name='reconstruction_mhp',
             )(x)
 
-        return models.Model(inputs=inputs_list, outputs=outputs,
-                            name=f"{arch}_{config.model.backbone}")
+        return models.Model(
+            inputs=inputs_list,
+            outputs=outputs,
+            name=f"{arch}_{config.model.backbone}",
+        )

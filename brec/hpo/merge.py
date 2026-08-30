@@ -1,5 +1,5 @@
-import os
 import glob
+import os
 
 import optuna
 
@@ -18,15 +18,18 @@ def merge_hpo_databases(storage_dir, study_name, output_db="hpo_final.db"):
 
     # 2. Create Target Study
     if output_db.startswith('sqlite:///'):
-        raise RuntimeError(f"'output_db' must be a path to file, got {output_db}...")
+        raise RuntimeError(
+            f"'output_db' must be a path to file, got {output_db}..."
+        )
     target_storage = f"sqlite:///{output_db}"
 
     # Delete if exists to start fresh merge
     if os.path.exists(output_db):
         os.remove(output_db)
 
-    target_study = optuna.create_study(study_name=study_name, storage=target_storage,
-                                       direction='minimize')
+    target_study = optuna.create_study(
+        study_name=study_name, storage=target_storage, direction='minimize'
+    )
 
     # 3. Smart Merging with Conflict Resolution
     seen_signatures = set()
@@ -38,8 +41,9 @@ def merge_hpo_databases(storage_dir, study_name, output_db="hpo_final.db"):
         print(f"Merging {db}...")
         try:
             source_storage = f"sqlite:///{db}"
-            source_study = optuna.load_study(study_name=study_name,
-                                             storage=source_storage)
+            source_study = optuna.load_study(
+                study_name=study_name, storage=source_storage
+            )
 
             for trial in source_study.trials:
                 # Only keep successful trials
@@ -52,7 +56,7 @@ def merge_hpo_databases(storage_dir, study_name, output_db="hpo_final.db"):
 
                 if param_signature in seen_signatures:
                     total_skipped += 1
-                    continue # skip duplicate!
+                    continue  # skip duplicate!
 
                 # Add to set and insert into target database
                 seen_signatures.add(param_signature)

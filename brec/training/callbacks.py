@@ -1,15 +1,13 @@
-import os
 import random
 
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-import matplotlib.pyplot as plt
-
-from brec.core.utils import logger
-from brec.core.geometry import GeometryOps, InputProcessor
-from brec.data.generators import GeneratorBase
-from brec.evaluation.metrics import get_oracle_prediction
+from ..core.utils import logger
+from ..core.geometry import GeometryOps, InputProcessor
+from ..data.generators import GeneratorBase
+from ..evaluation.metrics import get_oracle_prediction
 
 
 class TrainingVisualizer(tf.keras.callbacks.Callback):
@@ -17,6 +15,7 @@ class TrainingVisualizer(tf.keras.callbacks.Callback):
     Visualizes reconstruction performance on a fixed validation batch.
     Plots: Input (t-1), Ground Truth (t), Prediction (t), Error Map.
     """
+
     def __init__(self, val_dataset, config, frequency=5, num_samples=3):
         super().__init__()
         self.cfg = config  # store config
@@ -56,16 +55,19 @@ class TrainingVisualizer(tf.keras.callbacks.Callback):
         pred_batch_raw = self.model(input_micro_batch, training=False)
 
         # 2. Extract Oracle & Uncertainty
-        pred_batch_oracle = get_oracle_prediction(target_micro_batch,
-                                                  pred_batch_raw)
+        pred_batch_oracle = get_oracle_prediction(
+            target_micro_batch, pred_batch_raw
+        )
 
         if self.cfg.model.num_hypotheses > 1:
-            uncertainty_batch = tf.math.reduce_variance(pred_batch_raw, axis=-1,
-                                                        keepdims=True)
+            uncertainty_batch = tf.math.reduce_variance(
+                pred_batch_raw, axis=-1, keepdims=True
+            )
             # Normalize to 0-1 for nice visualization
-            uncertainty_batch = uncertainty_batch / (tf.reduce_max(uncertainty_batch,
-                                                                   axis=[1,2,3],
-                                                                   keepdims=True) + 1e-8)
+            uncertainty_batch = uncertainty_batch / (
+                tf.reduce_max(uncertainty_batch, axis=[1, 2, 3], keepdims=True)
+                + 1e-8
+            )
         else:
             uncertainty_batch = tf.zeros_like(pred_batch_oracle)
 
@@ -116,7 +118,7 @@ class TrainingVisualizer(tf.keras.callbacks.Callback):
             ax[1].axis('off')
 
             ax[2].imshow(img_pred, cmap='bone')
-            ax[2].set_title(f"Pred (MSE = {np.mean(diff ** 2):.4f})")
+            ax[2].set_title(f"Pred (MSE = {np.mean(diff**2):.4f})")
             ax[2].axis('off')
 
             ax[3].imshow(diff, cmap='inferno', vmin=0, vmax=0.3)
@@ -131,7 +133,7 @@ class TrainingVisualizer(tf.keras.callbacks.Callback):
         plt.tight_layout()
         plt.show()
 
-        plt.close(fig) # try to release RAM
+        plt.close(fig)  # try to release RAM
 
 
 class BufferUpdateCallback(tf.keras.callbacks.Callback):
@@ -139,6 +141,7 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
     Updates the Hallucination Buffer using the Active Data Manager.
     Samples directly from the currently loaded pool in RAM.
     """
+
     def __init__(self, manager, samples_per_epoch=512, rollout_depth=3):
         super().__init__()
         self.manager = manager
@@ -154,7 +157,7 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
         warmup = max(1, self.cfg.aug.prob_hallucination_warmup)
         current_prob = min(
             self.cfg.aug.prob_hallucination_max,
-            ((epoch + 1) / warmup) * self.cfg.aug.prob_hallucination_max
+            ((epoch + 1) / warmup) * self.cfg.aug.prob_hallucination_max,
         )
 
         self.cfg.aug.prob_hallucination_replay = current_prob
@@ -163,7 +166,9 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
         if current_prob < 1e-4:
             return
 
-        logger.debug(f"Populating hallucination buffer (Next Epoch Prob: {current_prob:.2f})")
+        logger.debug(
+            f"Populating hallucination buffer (Next Epoch Prob: {current_prob:.2f})"
+        )
 
         batch_size = self.cfg.train.batch_size // 2
         total_batches = max(1, self.samples // batch_size)
@@ -171,7 +176,7 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
         num_samples_processed = 0
 
         for _ in range(total_batches):
-            contexts =[]
+            contexts = []
 
             # A. Fill Initial Contexts
             for _ in range(batch_size):
@@ -180,48 +185,61 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
                 else:
                     vol = self.manager.get_volume('brats')
 
-                if vol is None: continue
+                if vol is None:
+                    continue
 
                 axis = random.choice(self.cfg.data.projections)
                 candidates = vol.indices['clean'][axis]
                 N = self.cfg.data.neighborhood
 
-                if len(candidates) < N + self.rollout_depth + 2: continue
+                if len(candidates) < N + self.rollout_depth + 2:
+                    continue
 
                 # Pick start so we have room to roll out
-                start_idx = random.choice(candidates[:-self.rollout_depth])
+                start_idx = random.choice(candidates[: -self.rollout_depth])
                 dim_size = vol.shape[axis]
-                if start_idx + N >= dim_size: continue
+                if start_idx + N >= dim_size:
+                    continue
 
-                full_stack = GeneratorBase._get_stack(vol.t1, axis, start_idx, N)
-                if full_stack is None: continue
+                full_stack = GeneratorBase._get_stack(
+                    vol.t1, axis, start_idx, N
+                )
+                if full_stack is None:
+                    continue
 
                 stack = full_stack[:-1].copy()
                 input_stack = np.transpose(stack, (1, 2, 0))
 
                 direction = 'forward'
 
-                if axis == 0:   view = vol.t1
-                elif axis == 1: view = np.moveaxis(vol.t1, 1, 0)
-                else:           view = np.moveaxis(vol.t1, 2, 0)
+                if axis == 0:
+                    view = vol.t1
+                elif axis == 1:
+                    view = np.moveaxis(vol.t1, 1, 0)
+                else:
+                    view = np.moveaxis(vol.t1, 2, 0)
 
-                contexts.append({
-                    'stack': input_stack, # (H, W, N)
-                    'idx': start_idx + N, # the index we are about to predict
-                    'path': vol.path,
-                    'axis': axis,         # Storing axis for the key
-                    'view': view,
-                    'native_h': view.shape[1],
-                    'native_w': view.shape[2],
-                    'dead': False         # Flag to stop NaN propagation
-                })
+                contexts.append(
+                    {
+                        'stack': input_stack,  # (H, W, N)
+                        'idx': start_idx
+                        + N,  # the index we are about to predict
+                        'path': vol.path,
+                        'axis': axis,  # Storing axis for the key
+                        'view': view,
+                        'native_h': view.shape[1],
+                        'native_w': view.shape[2],
+                        'dead': False,  # Flag to stop NaN propagation
+                    }
+                )
 
-            if not contexts: continue
+            if not contexts:
+                continue
 
             # B. Perform Rollout
             for step in range(self.rollout_depth):
                 batch_x = []
-                valid_indices =[]
+                valid_indices = []
 
                 for i, ctx in enumerate(contexts):
                     # Skip dead contexts (e.g., hit a NaN previously) or out of bounds
@@ -231,27 +249,32 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
                     target_slice = ctx['view'][ctx['idx']]
 
                     true_start_idx = (
-                        (ctx['idx'] - N) if direction == 'forward'
+                        (ctx['idx'] - N)
+                        if direction == 'forward'
                         else min(ctx['idx'] + N, ctx['view'].shape[0] - 1)
                     )
 
-                    model_inputs, scale, pads = InputProcessor.prepare_model_input(
-                        input_stack_native=ctx['stack'],
-                        target_slice_native=target_slice,
-                        start_idx=true_start_idx,
-                        target_idx=ctx['idx'],
-                        axis_size=ctx['view'].shape[0],
-                        direction=direction,
-                        config=self.cfg
+                    model_inputs, scale, pads = (
+                        InputProcessor.prepare_model_input(
+                            input_stack_native=ctx['stack'],
+                            target_slice_native=target_slice,
+                            start_idx=true_start_idx,
+                            target_idx=ctx['idx'],
+                            axis_size=ctx['view'].shape[0],
+                            direction=direction,
+                            config=self.cfg,
+                        )
                     )
 
                     hist_pad, scale, pads = GeometryOps.resize_and_pad(
                         tf.convert_to_tensor(model_inputs['history_input']),
-                        self.cfg.data.padded_size, 'bicubic'
+                        self.cfg.data.padded_size,
+                        'bicubic',
                     )
                     mask_pad, _, _ = GeometryOps.resize_and_pad(
                         tf.convert_to_tensor(model_inputs['mask_input']),
-                        self.cfg.data.padded_size, 'nearest'
+                        self.cfg.data.padded_size,
+                        'nearest',
                     )
                     model_inputs['history_input'] = hist_pad
                     model_inputs['mask_input'] = mask_pad
@@ -259,14 +282,14 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
                     batch_x.append(model_inputs)
                     valid_indices.append(i)
 
-                if not batch_x: break
+                if not batch_x:
+                    break
 
                 try:
                     keys = batch_x[0].keys()
                     inputs = {
-                        k: tf.stack(
-                            [sample[k] for sample in batch_x]
-                        ) for k in keys
+                        k: tf.stack([sample[k] for sample in batch_x])
+                        for k in keys
                     }
                 except Exception as e:
                     logger.error(f"BufferUpdateCallback Batching Failed: {e}")
@@ -281,9 +304,12 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
                     # preds = tf.reduce_mean(preds_raw, axis=-1, keepdims=True)
                     # Pick a random hypothesis index [0, M-1] (enhanced robustness)
                     idx = tf.random.uniform(
-                        shape=[], minval=0, maxval=self.cfg.model.num_hypotheses, dtype=tf.int32
+                        shape=[],
+                        minval=0,
+                        maxval=self.cfg.model.num_hypotheses,
+                        dtype=tf.int32,
                     )
-                    preds = preds_raw[..., idx:idx+1]
+                    preds = preds_raw[..., idx : idx + 1]
                 else:
                     preds = preds_raw
 
@@ -294,18 +320,27 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
 
                     _, scale, pads = GeometryOps.resize_and_pad(
                         tf.zeros((ctx['native_h'], ctx['native_w'], 1)),
-                        self.cfg.data.padded_size
+                        self.cfg.data.padded_size,
                     )
 
                     pred_restored = GeometryOps.inverse_resize_pad(
-                        pred_padded, (ctx['native_h'], ctx['native_w']),
-                        scale, pads
+                        pred_padded,
+                        (ctx['native_h'], ctx['native_w']),
+                        scale,
+                        pads,
                     ).numpy()[:, :, 0]
 
                     # NaN Check ("Poison Control")
-                    if np.isnan(pred_restored).any() or np.isinf(pred_restored).any():
-                        logger.warning(f"⚠️ NaN detected in Hallucination Rollout! Killing sequence for {ctx['path']}")
-                        ctx['dead'] = True  # Permanently disable this sequence for the rest of the rollout
+                    if (
+                        np.isnan(pred_restored).any()
+                        or np.isinf(pred_restored).any()
+                    ):
+                        logger.warning(
+                            f"⚠️ NaN detected in Hallucination Rollout! Killing sequence for {ctx['path']}"
+                        )
+                        ctx['dead'] = (
+                            True  # Permanently disable this sequence for the rest of the rollout
+                        )
                         continue
 
                     # STORE RESULT USING PROPER AXIS-AWARE KEY
@@ -315,28 +350,37 @@ class BufferUpdateCallback(tf.keras.callbacks.Callback):
                     num_samples_processed += 1
 
                     # ROLL THE STACK
-                    new_stack = np.concatenate([ctx['stack'][..., 1:],
-                                                pred_restored[..., None]],
-                                               axis=-1)
+                    new_stack = np.concatenate(
+                        [ctx['stack'][..., 1:], pred_restored[..., None]],
+                        axis=-1,
+                    )
                     ctx['stack'] = new_stack
                     ctx['idx'] += 1
 
                 # --- CRITICAL LEAK FIX: Clear Eager Tensors ---
                 # Forces TF memory pool to release these before the next step
-                if 'inputs' in locals(): del inputs
-                if 'preds_raw' in locals(): del preds_raw
-                if 'preds' in locals(): del preds
+                if 'inputs' in locals():
+                    del inputs
+                if 'preds_raw' in locals():
+                    del preds_raw
+                if 'preds' in locals():
+                    del preds
                 del batch_x, valid_indices
                 # ----------------------------------------------
 
-        logger.debug(f"Hallucination buffer updated: {num_samples_processed} samples")
+        logger.debug(
+            f"Hallucination buffer updated: {num_samples_processed} samples"
+        )
 
 
 class GeneratorCheckpoint(tf.keras.callbacks.Callback):
     """
     Saves ONLY the Generator sub-model from the GAN Trainer.
     """
-    def __init__(self, filepath, monitor='val_l1_loss', save_best_only=True, mode='min'):
+
+    def __init__(
+        self, filepath, monitor='val_l1_loss', save_best_only=True, mode='min'
+    ):
         super().__init__()
         self.filepath = filepath
         self.monitor = monitor
@@ -346,7 +390,8 @@ class GeneratorCheckpoint(tf.keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         current = logs.get(self.monitor)
-        if current is None: return
+        if current is None:
+            return
 
         if self.save_best_only:
             if self.mode == 'min':
@@ -357,7 +402,9 @@ class GeneratorCheckpoint(tf.keras.callbacks.Callback):
             if improved:
                 self.best = current
                 # Save the GENERATOR, not self.model (which is the Trainer)
-                self.model.generator.save(self.filepath) # .keras format
-                logger.info(f"\nEpoch {epoch + 1}: Generator saved to {self.filepath}")
+                self.model.generator.save(self.filepath)  # .keras format
+                logger.info(
+                    f"\nEpoch {epoch + 1}: Generator saved to {self.filepath}"
+                )
         else:
             self.model.generator.save(self.filepath)

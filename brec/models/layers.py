@@ -3,14 +3,16 @@ import tensorflow as tf
 
 from tensorflow.keras import layers
 
-
 try:
     from tensorflow.keras.layers import SpectralNormalization
 except ImportError:
     # Fallback: Just identity wrapper (no-op) if not available, to avoid complex custom code risks
     class SpectralNormalization(layers.Wrapper):
-        def __init__(self, layer, **kwargs): super().__init__(layer, **kwargs)
-        def call(self, inputs, training=None): return self.layer(inputs)
+        def __init__(self, layer, **kwargs):
+            super().__init__(layer, **kwargs)
+
+        def call(self, inputs, training=None):
+            return self.layer(inputs)
 
 
 # class SpectralNormalization(layers.Wrapper):
@@ -42,6 +44,7 @@ class Sampling(layers.Layer):
     Uses (z_mean, z_log_var) to sample z, the vector encoding a digit.
     Includes Float32 casting for stability in Mixed Precision.
     """
+
     def call(self, inputs):
         z_mean, z_log_var = inputs
 
@@ -67,6 +70,7 @@ class Sampling(layers.Layer):
 
 class VAELossLayer(layers.Layer):
     """Identity layer that adds KL Divergence loss."""
+
     def __init__(self, weight=1.0, **kwargs):
         super().__init__(**kwargs)
         self.weight = weight
@@ -88,7 +92,7 @@ class VAELossLayer(layers.Layer):
         # Add loss
         self.add_loss(kl_loss * self.weight)
 
-        return inputs[0] # pass-through
+        return inputs[0]  # pass-through
 
 
 class InstanceNormalization(layers.Layer):
@@ -96,25 +100,38 @@ class InstanceNormalization(layers.Layer):
     Standard Instance Normalization (not always available in base Keras).
     Normalizes (H, W) per channel, per sample.
     """
+
     def __init__(self, epsilon=1e-5, **kwargs):
         super().__init__(**kwargs)
         self.epsilon = epsilon
 
     def build(self, input_shape):
-        self.gamma = self.add_weight(name='gamma', shape=(input_shape[-1],),
-                                     initializer='ones', trainable=True)
-        self.beta = self.add_weight(name='beta', shape=(input_shape[-1],),
-                                    initializer='zeros', trainable=True)
+        self.gamma = self.add_weight(
+            name='gamma',
+            shape=(input_shape[-1],),
+            initializer='ones',
+            trainable=True,
+        )
+        self.beta = self.add_weight(
+            name='beta',
+            shape=(input_shape[-1],),
+            initializer='zeros',
+            trainable=True,
+        )
 
     def call(self, x):
         mean, variance = tf.nn.moments(x, axes=[1, 2], keepdims=True)
-        return self.gamma * (x - mean) / tf.sqrt(variance + self.epsilon) + self.beta
+        return (
+            self.gamma * (x - mean) / tf.sqrt(variance + self.epsilon)
+            + self.beta
+        )
 
 
 class FourierEmbedding(layers.Layer):
     """
     Pure sinusoidal feature expansion.
     """
+
     def __init__(self, num_freqs=8, **kwargs):
         super().__init__(**kwargs)
         self.num_freqs = num_freqs
@@ -177,15 +194,18 @@ class SPADELayer(layers.Layer):
         super().__init__(**kwargs)
         self.channels = channels
         self.bn = layers.BatchNormalization(center=False, scale=False)
-        self.conv_mask = layers.Conv2D(128, kernel_size=kernel_size,
-                                       padding='same', activation='relu')
-        self.conv_gamma = layers.Conv2D(channels, kernel_size=kernel_size,
-                                        padding='same')
-        self.conv_beta = layers.Conv2D(channels, kernel_size=kernel_size,
-                                       padding='same')
+        self.conv_mask = layers.Conv2D(
+            128, kernel_size=kernel_size, padding='same', activation='relu'
+        )
+        self.conv_gamma = layers.Conv2D(
+            channels, kernel_size=kernel_size, padding='same'
+        )
+        self.conv_beta = layers.Conv2D(
+            channels, kernel_size=kernel_size, padding='same'
+        )
 
     def call(self, inputs):
-        x, mask = inputs # purely spatial
+        x, mask = inputs  # purely spatial
 
         normalized = self.bn(x)
         target_size = tf.shape(x)[1:3]
@@ -203,7 +223,7 @@ class SPADEResBlock(layers.Layer):
     def __init__(self, filters, input_channels, **kwargs):
         super().__init__(**kwargs)
         self.filters = filters
-        self.learned_shortcut = (filters != input_channels)
+        self.learned_shortcut = filters != input_channels
         f_mid = min(filters, input_channels)
 
         self.spade1 = SPADELayer(input_channels)
@@ -213,11 +233,12 @@ class SPADEResBlock(layers.Layer):
 
         if self.learned_shortcut:
             self.spade_s = SPADELayer(input_channels)
-            self.conv_s = layers.Conv2D(filters, 1, padding='same',
-                                        use_bias=False)
+            self.conv_s = layers.Conv2D(
+                filters, 1, padding='same', use_bias=False
+            )
 
     def call(self, inputs):
-        x, mask = inputs # purely spatial
+        x, mask = inputs  # purely spatial
 
         x_s = x
         if self.learned_shortcut:
