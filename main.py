@@ -1,52 +1,54 @@
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import gc
 import glob
 import random
-import shutil
-import gc
-import copy
-import argparse
 
 from brec.core.env import KAGGLE, configure_xla_paths
+
 if not KAGGLE:
-    configure_xla_paths()  
+    configure_xla_paths()
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from skimage.metrics import structural_similarity as ssim
-from skimage.metrics import peak_signal_noise_ratio as psnr
-
 from tqdm import tqdm
 
-from configs.config import CFG, Config
-
-
+from brec.configs.config import CFG, Config
 from brec.core.utils import logger, PipelineTimer, InferenceProfiler
 from brec.core.geometry import GeometryOps
 from brec.data.files import find_t1_files, get_brats_subjects
 from brec.data.cache import ActiveLoader, StaticLoader, VolumeLoader
-from brec.data.generators import (IXIActiveGenerator, BraTSActiveGenerator,
-                                 SequentialValidationGenerator, create_tf_dataset,
-                                 get_training_dataset)
-from brec.models.builder import ModelBuilder
-from brec.models.losses import CompositeLoss
-import brec.models.losses as _losses
-from brec.training.trainer import Trainer
+from brec.data.generators import (
+    IXIActiveGenerator,
+    BraTSActiveGenerator,
+    SequentialValidationGenerator,
+    create_tf_dataset,
+    get_training_dataset,
+)
 from brec.inference.reconstructor import VolumeReconstructor
-from brec.evaluation.visualizer import (analyze_dataset_geometry, VisualizationSuite,
-                                       VolumeDashboard)
+from brec.evaluation.visualizer import (
+    analyze_dataset_geometry,
+    VisualizationSuite,
+    VolumeDashboard,
+)
 from brec.hpo.engine import HPMEngine
 from brec.hpo.merge import merge_hpo_databases
 from brec.hpo.analysis import analyze_hpo_results
+from brec.models import losses as _losses
+from brec.models.builder import ModelBuilder
+from brec.training.trainer import Trainer
+from brec.utils import calculate_step_metrics
 
 
 def get_ablation_configs(base_cfg):
     """Generates the 4 specific states for the CVPR ablation study."""
     import copy
+
     configs = {}
 
     # 0. Vanilla Drift U-Net (No Spatial Input, No Spatial Loss, No SPADE, No Buffer, No PE)
@@ -94,85 +96,9 @@ def get_ablation_configs(base_cfg):
     return configs
 
 
-def calc_focal_frequency_error(gt_slice: np.ndarray,
-                               pred_slice: np.ndarray,
-                               alpha: float = 1.0) -> float:
-    """
-    Computes the Focal Frequency Loss (FFL) as an evaluation metric.
-    Numpy equivalent of the TF implementation to prevent memory leaks during inference.
-    """
-    # 1. Compute 2D FFT (Complex domain)
-    fft_gt = np.fft.fft2(gt_slice)
-    fft_pr = np.fft.fft2(pred_slice)
-
-    # 2. Shift zero-frequency component to center
-    fft_gt = np.fft.fftshift(fft_gt)
-    fft_pr = np.fft.fftshift(fft_pr)
-
-    # 3. Calculate complex difference matrix d(u,v) = |F_r - F_f|^2
-    diff_matrix = np.abs(fft_gt - fft_pr) ** 2
-
-    # 4. Normalize difference matrix to [0, 1] for focal weighting
-    max_diff = np.max(diff_matrix)
-    if max_diff < 1e-8:
-        return 0.0
-
-    diff_norm = diff_matrix / max_diff
-
-    # 5. Calculate focal weights w(u,v) = d_norm(u,v)^alpha
-    weight_matrix = diff_norm ** alpha
-
-    # 6. Compute final weighted frequency loss
-    ffl = np.mean(weight_matrix * diff_matrix)
-
-    return float(ffl)
-
-
-def calc_gradient_sharpness_error(gt_slice, pred_slice):
-    """Numpy equivalent of your custom GradientSharpnessMetric"""
-    dy_gt, dx_gt = np.gradient(gt_slice)
-    dy_pr, dx_pr = np.gradient(pred_slice)
-    grad_diff = np.abs(dy_gt - dy_pr) + np.abs(dx_gt - dx_pr)
-    return float(np.mean(grad_diff))
-
-
-def calculate_step_metrics(gt_vol, pred_vol, start_idx, end_idx, direction, ablation_name, vol_id):
-    """Evaluates an autoregressive rollout step-by-step (k)."""
-    metrics_list =[]
-    iter_range = range(
-        start_idx, end_idx
-    ) if direction == 'forward' else range(
-        end_idx - 1, start_idx - 1, -1
-    )
-
-    for i, z_idx in enumerate(iter_range):
-        k = i + 1  # rollout step (1, 2, 3...)
-        gt_slice = gt_vol[z_idx]
-        pr_slice = pred_vol[z_idx]
-
-        mae = float(np.mean(np.abs(gt_slice - pr_slice)))
-        mse = float(np.mean(np.square(gt_slice - pr_slice)))
-        psnr_val = float(psnr(gt_slice, pr_slice, data_range=1.0)) if mse > 0 else 100.0
-        ssim_val = float(ssim(gt_slice, pr_slice, data_range=1.0))
-        grad_err = calc_gradient_sharpness_error(gt_slice, pr_slice)
-        ffl_err = calc_focal_frequency_error(gt_slice, pr_slice, alpha=1.0)
-
-        metrics_list.append({
-            'Ablation': ablation_name,
-            'Volume_ID': vol_id,
-            'Direction': direction,
-            'Rollout_Step_k': k,
-            'Z_Index': z_idx,
-            'SSIM': ssim_val,
-            'PSNR': psnr_val,
-            'MAE': mae,
-            'Grad_Error': grad_err,
-            'FFL': ffl_err  # <--- NEW LOGIC
-        })
-    return metrics_list
-
-
-def run_eda_mode(config, train_files, train_brats, input_only=False, downsample=2):
+def run_eda_mode(
+    config, train_files, train_brats, input_only=False, downsample=2
+):
     logger.info(">>> STARTING EDA DASHBOARD MODE (PIL Optimized) <<<")
 
     manager = ActiveLoader(config, train_files, train_brats)
@@ -185,7 +111,7 @@ def run_eda_mode(config, train_files, train_brats, input_only=False, downsample=
     dashboards = {}
 
     w_ixi = max(0.1, min(0.9, config.data.ixi_sampling_weight))
-    w_brats_tumor = 0.20 # FIXME: 20% slices with tumor assumption
+    w_brats_tumor = 0.20  # FIXME: 20% slices with tumor assumption
 
     batch_size = config.train.batch_size
     # FIXME: average 130 slices contain brain tissue assumption
@@ -197,7 +123,6 @@ def run_eda_mode(config, train_files, train_brats, input_only=False, downsample=
     logger.info(f"Simulating {total_samples} discrete samples...")
 
     for _ in tqdm(range(total_samples), desc="Simulating Epoch Flow"):
-
         # 1. Pipeline Probability Flow
         if random.random() < w_ixi:
             dir_name = 'eda_ixi_clean'
@@ -213,11 +138,11 @@ def run_eda_mode(config, train_files, train_brats, input_only=False, downsample=
         # 2. Enforce Strict 160x160 Padding (Fixes Slice Mismatches)
         hist_pad, _, _ = GeometryOps.resize_and_pad(
             tf.convert_to_tensor(model_inputs['history_input']),
-            config.data.padded_size, 'bicubic'
+            config.data.padded_size,
+            'bicubic',
         )
         y_pad, _, _ = GeometryOps.resize_and_pad(
-            tf.convert_to_tensor(y),
-            config.data.padded_size, 'nearest'
+            tf.convert_to_tensor(y), config.data.padded_size, 'nearest'
         )
 
         hist_np = hist_pad.numpy()
@@ -229,9 +154,9 @@ def run_eda_mode(config, train_files, train_brats, input_only=False, downsample=
         dash_key = (dir_name, path, axis)
 
         if dash_key not in dashboards:
-            dashboards[dash_key] = VolumeDashboard(path, info['axis_size'],
-                                                   axis, dir_name,
-                                                   downsample=downsample)
+            dashboards[dash_key] = VolumeDashboard(
+                path, info['axis_size'], axis, dir_name, downsample=downsample
+            )
         dash = dashboards[dash_key]
 
         # NEW: Increment the sequence Z-index for this specific brain
@@ -248,22 +173,38 @@ def run_eda_mode(config, train_files, train_brats, input_only=False, downsample=
         for i in range(N):
             img_slice = hist_np[:, :, i]
             s_idx = spatial_indices[i]
-            role = f"T-{N-i}"
-            dash.update(s_idx, img_slice, role, info, z_index=current_z,
-                        is_target=False, tumor_mask=padded_tumor_mask)
+            role = f"T-{N - i}"
+            dash.update(
+                s_idx,
+                img_slice,
+                role,
+                info,
+                z_index=current_z,
+                is_target=False,
+                tumor_mask=padded_tumor_mask,
+            )
 
         # Update Target Slice
         if not input_only:
             target_img = y_np[:, :, 0]
             target_s_idx = spatial_indices[-1]
-            dash.update(target_s_idx, target_img, "T", info, z_index=current_z,
-                        is_target=True, tumor_mask=padded_tumor_mask)
+            dash.update(
+                target_s_idx,
+                target_img,
+                "T",
+                info,
+                z_index=current_z,
+                is_target=True,
+                tumor_mask=padded_tumor_mask,
+            )
 
     VisualizationSuite.plot_sampling_statistics(manager)
 
     manager.stop()
 
-    logger.info(f"Rendering {len(dashboards)} unique volume dashboards to disk...")
+    logger.info(
+        f"Rendering {len(dashboards)} unique volume dashboards to disk..."
+    )
     for dash in tqdm(dashboards.values(), desc="Rendering Images"):
         dash.render(input_only=input_only)
 
@@ -276,7 +217,9 @@ def run_pipeline(mode='train', test_mode=False):
     # Override for Quick Kaggle Test
     test_mode = config.run_type == 'Interactive'
     if test_mode:
-        logger.info(">>> TEST MODE ENABLED: Reducing HPO parameters for sanity check.")
+        logger.info(
+            ">>> TEST MODE ENABLED: Reducing HPO parameters for sanity check."
+        )
         # config.train.epochs = 2
         config.hpo.n_trials = 2
         config.hpo.train_steps_per_trial = 10
@@ -310,7 +253,10 @@ def run_pipeline(mode='train', test_mode=False):
         # 2b. Split BraTS (Fixing the blind validation bug)
         random.shuffle(brats_list)
         brats_split = int(0.9 * len(brats_list))
-        train_brats, val_brats = brats_list[:brats_split], brats_list[brats_split:]
+        train_brats, val_brats = (
+            brats_list[:brats_split],
+            brats_list[brats_split:],
+        )
 
         # Calculate Steps (Heuristic based on volume size ~130 slices)
         # Since we use random sampling, we define an "epoch" arbitrarily to match dataset size
@@ -335,9 +281,14 @@ def run_pipeline(mode='train', test_mode=False):
         hpo_engine = HPMEngine(config, train_files, brats_list)
         hpo_engine.run()
         # FIXME: decouple HPO merge and analyze, do not run in parallel
-        merge_hpo_databases(config.hpo.storage_dir, config.hpo.study_name,
-                            config.hpo.database_name)
-        analyze_hpo_results(f"sqlite:///{config.hpo.database_name}") # "sqlite:///hpo_final.db"
+        merge_hpo_databases(
+            config.hpo.storage_dir,
+            config.hpo.study_name,
+            config.hpo.database_name,
+        )
+        analyze_hpo_results(
+            f"sqlite:///{config.hpo.database_name}"
+        )  # "sqlite:///hpo_final.db"
         return
 
     if mode == 'eda':
@@ -356,7 +307,6 @@ def run_pipeline(mode='train', test_mode=False):
     # with ActiveLoader(config, train_files, brats_list) as train_loader:
     # --- Training Loader (Active) ---
     with ActiveLoader(config, train_files, train_brats) as train_loader:
-
         # 3. Setup Generators
         with PipelineTimer("2. Generator & Dataset Setup"):
             # Training Generators (Infinite)
@@ -371,8 +321,9 @@ def run_pipeline(mode='train', test_mode=False):
             # val_gen = IXIActiveGenerator(val_loader)
             # val_ds = create_tf_dataset(val_gen, config, is_training=False).take(val_steps)
             # Use the Unbiased, Deterministic Validation Generator
-            val_gen = SequentialValidationGenerator(val_loader,
-                                                    max_slices_per_vol=15)
+            val_gen = SequentialValidationGenerator(
+                val_loader, max_slices_per_vol=15
+            )
             # Remove .take() because it is natively finite now!
             val_ds = create_tf_dataset(val_gen, config, is_training=False)
             # Since val_ds is finite, tell Trainer to iterate until exhaustion
@@ -386,8 +337,15 @@ def run_pipeline(mode='train', test_mode=False):
             train_loader.model = model
 
             # Trainer
-            trainer = Trainer(config, model, train_ds, val_ds, train_loader,
-                              train_steps=train_steps, val_steps=val_steps)
+            trainer = Trainer(
+                config,
+                model,
+                train_ds,
+                val_ds,
+                train_loader,
+                train_steps=train_steps,
+                val_steps=val_steps,
+            )
 
         # 4. Pre-Training Visualization
         with PipelineTimer("3. visualization (Data Augmentation Check)"):
@@ -395,10 +353,12 @@ def run_pipeline(mode='train', test_mode=False):
             # This enables "hunting" for rare augmentations
 
             # Create finite datasets for sampling
-            viz_ixi = create_tf_dataset(train_ixi, config, is_training=True,
-                                        include_info=True)
-            viz_brats = create_tf_dataset(train_brats, config, is_training=True,
-                                          include_info=True)
+            viz_ixi = create_tf_dataset(
+                train_ixi, config, is_training=True, include_info=True
+            )
+            viz_brats = create_tf_dataset(
+                train_brats, config, is_training=True, include_info=True
+            )
 
             # Mix them (Weighted)
             # Use Configurable Weights
@@ -408,15 +368,15 @@ def run_pipeline(mode='train', test_mode=False):
             w_brats = 1.0 - w_ixi
             # Use repeat() to allow 'hunting' through many samples
             viz_ds = tf.data.Dataset.sample_from_datasets(
-                [viz_ixi.repeat(), viz_brats.repeat()],
-                weights=[w_ixi, w_brats]
+                [viz_ixi.repeat(), viz_brats.repeat()], weights=[w_ixi, w_brats]
             )
 
             # CRITICAL: Batch the viz dataset, otherwise plotter crashes on scalars
             viz_ds = viz_ds.batch(1)
 
-            VisualizationSuite.plot_augmentations(viz_ds, num_groups=2,
-                                                  batch_mode=config.batch_mode)
+            VisualizationSuite.plot_augmentations(
+                viz_ds, num_groups=2, batch_mode=config.batch_mode
+            )
 
         # 5. Training Loop
         name_model = f"{config.model.name}_best.keras"
@@ -431,11 +391,15 @@ def run_pipeline(mode='train', test_mode=False):
             # --- RESTORED: RESUME TRAINING LOGIC ---
             if config.train.resume_training:
                 if os.path.exists(config.train.resume_training):
-                    logger.info(f"♻️ Resuming training from '{config.train.resume_training}'...")
+                    logger.info(
+                        f"♻️ Resuming training from '{config.train.resume_training}'..."
+                    )
                     # Load weights into the generator before the Trainer potentially wraps it in GAN mode
                     model.load_weights(config.train.resume_training)
                 else:
-                    logger.warning(f"⚠️ Resume path '{config.train.resume_training}' not found. Starting from scratch...")
+                    logger.warning(
+                        f"⚠️ Resume path '{config.train.resume_training}' not found. Starting from scratch..."
+                    )
             # ---------------------------------------
 
             history = trainer.train()
@@ -458,8 +422,9 @@ def run_pipeline(mode='train', test_mode=False):
             # Note: val_loader has 'pool'. We can grab a path from there
             if val_files:
                 VisualizationSuite.plot_autoregressive_performance(
-                    reconstructor, {'id': None, 't1': val_files[0], 'seg': None},
-                    val_loader
+                    reconstructor,
+                    {'id': None, 't1': val_files[0], 'seg': None},
+                    val_loader,
                 )
             # Autoregressive on BraTS
             if brats_list:
@@ -467,16 +432,19 @@ def run_pipeline(mode='train', test_mode=False):
                     reconstructor, brats_list[0], train_loader
                 )
                 VisualizationSuite.plot_autoregressive_performance(
-                    reconstructor, brats_list[0], train_loader,
-                    masked_inference=True
+                    reconstructor,
+                    brats_list[0],
+                    train_loader,
+                    masked_inference=True,
                 )
 
             # Bidirectional on a real validation file
             # Note: val_loader has 'pool'. We can grab a path from there
             if val_files:
                 VisualizationSuite.plot_bidirectional(
-                    reconstructor, {'id': None, 't1': val_files[0], 'seg': None},
-                    val_loader
+                    reconstructor,
+                    {'id': None, 't1': val_files[0], 'seg': None},
+                    val_loader,
                 )
             # Bidirectional on BraTS
             if brats_list:
@@ -485,8 +453,10 @@ def run_pipeline(mode='train', test_mode=False):
                     reconstructor, brats_list[0], train_loader
                 )
                 VisualizationSuite.plot_bidirectional(
-                    reconstructor, brats_list[0], train_loader,
-                    masked_inference=True
+                    reconstructor,
+                    brats_list[0],
+                    train_loader,
+                    masked_inference=True,
                 )
 
             # Data sampling statistics
@@ -496,7 +466,9 @@ def run_pipeline(mode='train', test_mode=False):
                 pass
 
 
-def run_ablation_study_(base_config, train_files, val_files, train_brats, val_brats):
+def run_ablation_study_(
+    base_config, train_files, val_files, train_brats, val_brats
+):
     logger.info(">>> STARTING CVPR ABLATION STUDY <<<")
     configs = get_ablation_configs(base_config)
 
@@ -504,12 +476,14 @@ def run_ablation_study_(base_config, train_files, val_files, train_brats, val_br
     results_dir = base_config.data.results_dir
     os.makedirs(results_dir, exist_ok=True)
 
-    all_metrics =[]
+    all_metrics = []
 
     # --- KAGGLE INTERACTIVE PROTECTIONS ---
     is_interactive = base_config.run_type == 'Interactive'
     n_eval_vols = 2 if is_interactive else 10
-    rollout_span = 5 if is_interactive else 20  # 10 steps total interactively vs 40 steps for prod
+    rollout_span = (
+        5 if is_interactive else 20
+    )  # 10 steps total interactively vs 40 steps for prod
 
     if KAGGLE:
         # Prevent System RAM OOM by drastically shrinking the active caching pools
@@ -523,7 +497,9 @@ def run_ablation_study_(base_config, train_files, val_files, train_brats, val_br
 
     # 2. Prevent Kaggle Batch OOM: Cap static validation pool globally for Kaggle
     max_val_vols = 20 if KAGGLE else 50
-    val_loader = StaticLoader(base_config, val_files[:max_val_vols], val_brats[:max_val_vols])
+    val_loader = StaticLoader(
+        base_config, val_files[:max_val_vols], val_brats[:max_val_vols]
+    )
 
     for ab_name, cfg in configs.items():
         logger.info(f"=============================================")
@@ -531,47 +507,67 @@ def run_ablation_study_(base_config, train_files, val_files, train_brats, val_br
         logger.info(f"=============================================")
 
         # model_weights_path = f"{ABLATION_DIR}/model_{ab_name}.keras"
-        primary_weights_path = os.path.join(weights_dir, f"model_{ab_name}.keras")
+        primary_weights_path = os.path.join(
+            weights_dir, f"model_{ab_name}.keras"
+        )
         local_weights_path = os.path.join(results_dir, f"model_{ab_name}.keras")
 
         # We must rebuild the active loader because the config dictates hallucination probabilities
         with ActiveLoader(cfg, train_files, train_brats) as train_loader:
-
             # --- MODEL BUILDING & TRAINING ---
             model = ModelBuilder.build(cfg)
-            train_loader.model = model # attach for Buffer Updates
+            train_loader.model = model  # attach for Buffer Updates
 
             if os.path.exists(primary_weights_path):
-                logger.info(f"✅ Found existing weights in dataset for {ab_name}. Skipping training!")
+                logger.info(
+                    f"✅ Found existing weights in dataset for {ab_name}. Skipping training!"
+                )
                 logger.debug(f"Model weights = {primary_weights_path}")
                 model.load_weights(primary_weights_path)
             elif os.path.exists(local_weights_path):
-                logger.info(f"✅ Found locally trained weights for {ab_name}. Skipping training!")
+                logger.info(
+                    f"✅ Found locally trained weights for {ab_name}. Skipping training!"
+                )
                 logger.debug(f"Model weights = {local_weights_path}")
                 model.load_weights(local_weights_path)
             else:
                 logger.info(f"⚙️ Training {ab_name} model from scratch...")
                 # Setup Training pipeline natively
                 train_ixi = IXIActiveGenerator(train_loader)
-                train_brats_gen = BraTSActiveGenerator(train_loader, mode='clean')
+                train_brats_gen = BraTSActiveGenerator(
+                    train_loader, mode='clean'
+                )
                 train_ds = get_training_dataset(train_ixi, train_brats_gen, cfg)
 
-                val_gen = SequentialValidationGenerator(val_loader, max_slices_per_vol=15)
+                val_gen = SequentialValidationGenerator(
+                    val_loader, max_slices_per_vol=15
+                )
                 val_ds = create_tf_dataset(val_gen, cfg, is_training=False)
 
                 # Heuristic steps based on dataset size (Scale down for Interactive)
-                train_steps = max(
-                    10, (len(train_files) * 130) // cfg.train.batch_size
-                ) if is_interactive else max(
-                    50, (len(train_files) * 130) // cfg.train.batch_size
+                train_steps = (
+                    max(10, (len(train_files) * 130) // cfg.train.batch_size)
+                    if is_interactive
+                    else max(
+                        50, (len(train_files) * 130) // cfg.train.batch_size
+                    )
                 )
 
-                trainer = Trainer(cfg, model, train_ds, val_ds, train_loader,
-                                  train_steps=train_steps, val_steps=None)
+                trainer = Trainer(
+                    cfg,
+                    model,
+                    train_ds,
+                    val_ds,
+                    train_loader,
+                    train_steps=train_steps,
+                    val_steps=None,
+                )
                 trainer.train(compile_model=True)
 
                 logger.info(f"💾 Saving {ab_name} model weights...")
-                model.save(local_weights_path)  # save full model to local writable dir
+                model.save(
+                    local_weights_path
+                )  # save full model to local writable dir
 
             # --- FIX: Kill the loader's background thread before inference ---
             train_loader.stop()
@@ -579,21 +575,30 @@ def run_ablation_study_(base_config, train_files, val_files, train_brats, val_br
             # --- INFERENCE & ARTIFACT GENERATION (Phase 3) ---
             logger.info(f"🔍 Running Autoregressive Inference for {ab_name}...")
             reconstructor = VolumeReconstructor(model, cfg)
-            reconstructor.cfg.batch_mode = True  # <--- FIX: silences the internal TQDM spam!
+            reconstructor.cfg.batch_mode = (
+                True  # <--- FIX: silences the internal TQDM spam!
+            )
 
             # Helper to run eval on a specific pool
             def evaluate_pool(pool, dataset_name):
                 profiler = InferenceProfiler(ab_name, results_dir)
 
-                for vol_obj in tqdm(pool, desc=f"Evaluating {dataset_name} ({ab_name})"):
+                for vol_obj in tqdm(
+                    pool, desc=f"Evaluating {dataset_name} ({ab_name})"
+                ):
                     vol = vol_obj.t1
-                    vol_id = os.path.basename(vol_obj.path).replace('.nii.gz', '').replace('.nii', '')
+                    vol_id = (
+                        os.path.basename(vol_obj.path)
+                        .replace('.nii.gz', '')
+                        .replace('.nii', '')
+                    )
 
                     # Target a rollout near the center of the brain
                     center = vol.shape[0] // 2
                     start, end = center - rollout_span, center + rollout_span
 
-                    if end - start < (rollout_span * 2) or start < 0: continue
+                    if end - start < (rollout_span * 2) or start < 0:
+                        continue
 
                     # 1. Forward Pass (No mask -> Pure Autoregression)
                     profiler.start()
@@ -603,12 +608,16 @@ def run_ablation_study_(base_config, train_files, val_files, train_brats, val_br
                     profiler.stop_and_log(vol_id)
 
                     # 2. Extract Per-Step Metrics
-                    metrics = calculate_step_metrics(vol, recon_vol, start, end,
-                                                     'forward', ab_name, vol_id)
+                    metrics = calculate_step_metrics(
+                        vol, recon_vol, start, end, 'forward', ab_name, vol_id
+                    )
                     all_metrics.extend(metrics)
 
                     # 3. Save Raw NPY Volume (For Phase 4 Image Matrices)
-                    np.save(os.path.join(results_dir, f"{ab_name}_{vol_id}.npy"), recon_vol)
+                    np.save(
+                        os.path.join(results_dir, f"{ab_name}_{vol_id}.npy"),
+                        recon_vol,
+                    )
 
                     # Save Ground Truth (Only needs to be done once per volume, but overwriting is safe/fast)
                     np.save(os.path.join(results_dir, f"gt_{vol_id}.npy"), vol)
@@ -616,15 +625,20 @@ def run_ablation_study_(base_config, train_files, val_files, train_brats, val_br
             # Evaluate on IXI and BraTS pools loaded in the static val_loader
             # --- EVALUATION ROUTING (Respecting Dataset Weights) ---
             if cfg.data.ixi_sampling_weight > 1e-8:
-                evaluate_pool([
-                    v for v in val_loader.pool['ixi'] if v.path in test_ixi
-                ], "IXI")
+                evaluate_pool(
+                    [v for v in val_loader.pool['ixi'] if v.path in test_ixi],
+                    "IXI",
+                )
 
             if cfg.data.ixi_sampling_weight < 1.0 - 1e-8:
-                evaluate_pool([
-                    v for v in val_loader.pool['brats']
-                    if v.path in [b['t1'] for b in test_brats]
-                ], "BraTS")
+                evaluate_pool(
+                    [
+                        v
+                        for v in val_loader.pool['brats']
+                        if v.path in [b['t1'] for b in test_brats]
+                    ],
+                    "BraTS",
+                )
 
             # --- CRITICAL LEAK FIX: Wipe the RAM cache for the next ablation ---
             train_loader.pool.clear()
@@ -634,11 +648,16 @@ def run_ablation_study_(base_config, train_files, val_files, train_brats, val_br
 
         # --- CRITICAL OOM FIX: Deep Memory Cleanup ---
         # 1. Delete local references to destroy the datasets and iterators
-        if 'model' in locals(): del model
-        if 'trainer' in locals(): del trainer
-        if 'train_ds' in locals(): del train_ds
-        if 'val_ds' in locals(): del val_ds
-        if 'reconstructor' in locals(): del reconstructor
+        if 'model' in locals():
+            del model
+        if 'trainer' in locals():
+            del trainer
+        if 'train_ds' in locals():
+            del train_ds
+        if 'val_ds' in locals():
+            del val_ds
+        if 'reconstructor' in locals():
+            del reconstructor
 
         # 2. Destroy the Perceptual Loss Singleton so it doesn't bleed into the next model
         _losses._GLOBAL_PERCEPTUAL_LOSS = None
@@ -678,7 +697,7 @@ def run_ablation_study(CFG):
     run_ablation_study_(CFG, t_files, v_files, t_brats, v_brats)
 
 
-def main(mode='ablation', weights_dir = None, preload_dir = None):
+def main(mode='ablation', weights_dir=None, preload_dir=None):
     """
     Initializes configuration and launches a specific pipeline based on the `mode` argument.
     Args:
@@ -699,9 +718,9 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
     """
 
     if weights_dir:
-        CFG.data.weights_dir = weights_dir       
+        CFG.data.weights_dir = weights_dir
     elif not CFG.data.weights_dir:
-        CFG.data.weights_dir = 'ablations'       
+        CFG.data.weights_dir = 'ablations'
 
     if preload_dir:
         CFG.data.preload_dir = preload_dir
@@ -711,32 +730,52 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
     try:
         # Lazy heavy imports (the notebook's own import cells cover them; Python caches the import)
         import cvpr_plots
-        from cvpr_plots import (run_cvpr_rendering, generate_figure_4_anatomical_dsc,
-                                generate_figure_5_frechet_distances)
+        from cvpr_plots import (
+            run_cvpr_rendering,
+            generate_figure_4_anatomical_dsc,
+            generate_figure_5_frechet_distances,
+        )
         from brec.evaluation.monai_sota import MonaiSotaEvaluator
         from brec.evaluation.frechet import FrechetEvaluator
         from brec.evaluation.fastsurfer import FastSurferEvaluator
         from brec.evaluation.synthseg import SynthSegEvaluator
 
-
         if mode == 'all':
-            logger.info(">>> 🚀 INITIATING FULL MASTER EVALUATION PIPELINE 🚀 <<<")
+            logger.info(
+                ">>> 🚀 INITIATING FULL MASTER EVALUATION PIPELINE 🚀 <<<"
+            )
 
             # --- 0. PRELOAD PREVIOUS RESULTS (RESUMABILITY) ---
             if os.path.exists(CFG.data.preload_dir):
-                logger.info(f"📥 Preloading existing results from {CFG.data.preload_dir}...")
+                logger.info(
+                    f"📥 Preloading existing results from {CFG.data.preload_dir}..."
+                )
                 os.makedirs(CFG.data.results_dir, exist_ok=True)
                 import shutil
+
                 # Direct 1:1 copy from the read-only mount to our writable results directory
-                shutil.copytree(CFG.data.preload_dir, CFG.data.results_dir, dirs_exist_ok=True)
-                logger.info("✅ Preload complete. Existing volumes will be skipped!")
+                shutil.copytree(
+                    CFG.data.preload_dir,
+                    CFG.data.results_dir,
+                    dirs_exist_ok=True,
+                )
+                logger.info(
+                    "✅ Preload complete. Existing volumes will be skipped!"
+                )
 
             # --- 1. ABLATION STUDY (Our Models) ---
-            logger.info("\n" + "=" * 50 + "\n PHASE 1: ABLATION STUDY \n" + "=" * 50)
+            logger.info(
+                "\n" + "=" * 50 + "\n PHASE 1: ABLATION STUDY \n" + "=" * 50
+            )
             run_ablation_study(CFG)
 
             # --- 2. SOTA EVALUATION (MONAI 3D LDM) ---
-            logger.info("\n" + "=" * 50 + "\n PHASE 2: MONAI SOTA INFERENCE \n" + "=" * 50)
+            logger.info(
+                "\n"
+                + "=" * 50
+                + "\n PHASE 2: MONAI SOTA INFERENCE \n"
+                + "=" * 50
+            )
             t1_files = find_t1_files(CFG.data.data_root_ixi)
             brats_list = get_brats_subjects(CFG.data.data_root_brats)
 
@@ -745,34 +784,48 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
             ixi_split = int(0.9 * len(t1_files))
             _, v_files = t1_files[:ixi_split], t1_files[ixi_split:]
 
-            brats_pool =[]
-            for b in brats_list[:20]: 
+            brats_pool = []
+            for b in brats_list[:20]:
                 v = VolumeLoader.load(b['t1'], b['seg'])
-                if v: brats_pool.append(v)
+                if v:
+                    brats_pool.append(v)
 
             sota_eval = MonaiSotaEvaluator(CFG)
             sota_eval.setup()
             num_sota_vols = 5 if CFG.run_type == 'Interactive' else 20
             # sota_eval.evaluate_masked_inpainting(v_files, brats_pool, num_volumes=num_sota_vols)
-            sota_eval.evaluate_sota_models(v_files, brats_pool, num_volumes=num_sota_vols)
+            sota_eval.evaluate_sota_models(
+                v_files, brats_pool, num_volumes=num_sota_vols
+            )
 
             # --- 3. FRÉCHET METRICS (3D-FID & FVD) ---
-            logger.info("\n" + "=" * 50 + "\n PHASE 3: FRÉCHET METRICS \n" + "=" * 50)
+            logger.info(
+                "\n" + "=" * 50 + "\n PHASE 3: FRÉCHET METRICS \n" + "=" * 50
+            )
             frechet_eval = FrechetEvaluator(CFG)
             frechet_eval.evaluate()
 
             # --- 4. ANATOMICAL VALIDATION (FastSurfer DSC) ---
-            logger.info("\n" + "=" * 50 + "\n PHASE 4: ANATOMICAL VALIDATION \n" + "=" * 50)
+            logger.info(
+                "\n"
+                + "=" * 50
+                + "\n PHASE 4: ANATOMICAL VALIDATION \n"
+                + "=" * 50
+            )
             dsc_eval = FastSurferEvaluator(CFG)
             dsc_eval.setup()
             dsc_eval.convert_to_nifti()
             dsc_eval.run_prediction()
             dsc_eval.calculate_dsc()
             # --- 5. CVPR PLOTTING ---
-            logger.info("\n" + "=" * 50 + "\n PHASE 5: CVPR PLOTTING \n" + "=" * 50)
+            logger.info(
+                "\n" + "=" * 50 + "\n PHASE 5: CVPR PLOTTING \n" + "=" * 50
+            )
             run_cvpr_rendering(render_supp=False)
 
-            logger.info(">>> 🎉 MASTER PIPELINE COMPLETE! CHECK 'paper_figures' DIRECTORY 🎉 <<<")
+            logger.info(
+                ">>> 🎉 MASTER PIPELINE COMPLETE! CHECK 'paper_figures' DIRECTORY 🎉 <<<"
+            )
 
         elif mode == 'ablation':
             # Run the study
@@ -786,7 +839,9 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
             # Check if we have data to process
             npy_files = glob.glob(os.path.join(CFG.data.results_dir, "*.npy"))
             if not npy_files:
-                logger.warning(f"No .npy files found in '{CFG.data.results_dir}'. Running 'ablation' mode...")
+                logger.warning(
+                    f"No .npy files found in '{CFG.data.results_dir}'. Running 'ablation' mode..."
+                )
                 run_ablation_study(CFG)
 
             evaluator.convert_to_nifti()
@@ -801,7 +856,9 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
             # Check if we have data to process
             npy_files = glob.glob(os.path.join(CFG.data.results_dir, "*.npy"))
             if not npy_files:
-                logger.warning(f"No .npy files found in '{CFG.data.results_dir}'. Running 'ablation' mode...")
+                logger.warning(
+                    f"No .npy files found in '{CFG.data.results_dir}'. Running 'ablation' mode..."
+                )
                 run_ablation_study(CFG)
 
             evaluator.evaluate()
@@ -818,27 +875,38 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
 
             # Load BraTS pool for realistic masks
             brats_pool = []
-            for b in brats_list[:20]: 
+            for b in brats_list[:20]:
                 v = VolumeLoader.load(b['t1'], b['seg'])
-                if v: brats_pool.append(v)
+                if v:
+                    brats_pool.append(v)
 
             # 2. Run MONAI SOTA
             sota_eval = MonaiSotaEvaluator(CFG)
             sota_eval.setup()
             sota_eval.evaluate_masked_inpainting(
-                v_files, brats_pool,
-                num_volumes=5 if CFG.run_type == 'Interactive' else 20
+                v_files,
+                brats_pool,
+                num_volumes=5 if CFG.run_type == 'Interactive' else 20,
             )
 
         elif mode == 'cvpr':
             # --- 0. PRELOAD PREVIOUS RESULTS (RESUMABILITY) ---
             if os.path.exists(CFG.data.preload_dir):
-                logger.info(f"📥 Preloading existing results from {CFG.data.preload_dir}...")
+                logger.info(
+                    f"📥 Preloading existing results from {CFG.data.preload_dir}..."
+                )
                 os.makedirs(CFG.data.results_dir, exist_ok=True)
                 import shutil
+
                 # Direct 1:1 copy from the read-only mount to our writable results directory
-                shutil.copytree(CFG.data.preload_dir, CFG.data.results_dir, dirs_exist_ok=True)
-                logger.info("✅ Preload complete. Existing volumes will be skipped!")
+                shutil.copytree(
+                    CFG.data.preload_dir,
+                    CFG.data.results_dir,
+                    dirs_exist_ok=True,
+                )
+                logger.info(
+                    "✅ Preload complete. Existing volumes will be skipped!"
+                )
 
             run_cvpr_rendering(render_supp=True)
         else:
@@ -847,8 +915,11 @@ def main(mode='ablation', weights_dir = None, preload_dir = None):
     except Exception as e:
         logger.error(f"Pipeline Failed: {e}")
         import traceback
+
         traceback.print_exc()
 
 
 if __name__ == '__main__':
+    import argparse
+
     main()
