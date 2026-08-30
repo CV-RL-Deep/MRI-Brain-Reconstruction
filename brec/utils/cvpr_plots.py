@@ -1,22 +1,19 @@
 import os
 import glob
-import shutil
 import zipfile
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-
 import tensorflow as tf
 
-from configs.config import CFG
-from brec.data.files import find_t1_files, get_brats_subjects
-from main import get_ablation_configs
-from brec.data.cache import VolumeLoader
-from brec.models.builder import ModelBuilder
-from brec.inference.reconstructor import VolumeReconstructor
-from brec.evaluation.visualizer import VisualizationSuite
+from ..configs.config import CFG
+from ..data.files import find_t1_files, get_brats_subjects
+from ..data.cache import VolumeLoader
+from ..evaluation.visualizer import VisualizationSuite
+from ..inference.reconstructor import VolumeReconstructor
+from ..models.builder import ModelBuilder
 
 
 # 1. Config-Driven Pathing & Auto-Unzip
@@ -935,7 +932,7 @@ def generate_supp_bidirectional():
         plt.close()
 
 
-def generate_supp_ablation_masked_ar():
+def generate_supp_ablation_masked_ar(configs):
     print("Generating Supp: Ablation Masked AR...")
     ixi_files = find_t1_files(CFG.data.data_root_ixi)
     if not ixi_files:
@@ -980,8 +977,6 @@ def generate_supp_ablation_masked_ar():
     rollout_span = 10 if is_interactive else 30
     start = max(0, center - rollout_span)
     end = min(vol.shape[0], center + rollout_span)
-
-    configs = get_ablation_configs(CFG)
 
     for ab_name, cfg in configs.items():
         # weight_path = os.path.join(ABLATION_DIR, f'model_{ab_name}.keras')
