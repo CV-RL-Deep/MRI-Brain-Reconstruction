@@ -1,31 +1,32 @@
 # ML Frameworks 
-tensorflow>=2.10,<2.16
-torch>=2.0,<2.5
-torchvision>=0.15
+tensorflow>=2.18.0
+torch>=2.6.0
+torchvision>=0.21.0
 
 # Core Math & Data 
-numpy>=1.23,<2.0
-scipy>=1.9
-pandas>=1.5
+numpy>=1.26.4,<2.0
+scipy>=1.15.3
+pandas>=2.2.3
 
 # Medical Imaging & Vision 
-nibabel>=4.0
+nibabel>=5.3.2
 scikit-image>=0.19
+# Pillow>=11.2.1
 
 # Visualization & UI 
-matplotlib>=3.6
-seaborn>=0.12
-plotly>=5.0
-Pillow>=9.0
-ipython>=8.0
+matplotlib>=3.7.2
+seaborn>=0.12.2
+plotly>=5.24.1
+# ipython>=7.34.0
+# ipywidgets>=8.1.5
 
 # Utilities & Optimization
-tqdm>=4.64
-psutil>=5.9
-optuna>=3.0
+tqdm>=4.67.1
+psutil>=7.0.0
+optuna>=4.4.0
 
-# SOTA Evaluation 
-monai>=1.2,<2.0
-monai-generative>=0.2,<0.3
-einops>=0.6
+# SOTA Evaluation (installed dynamically)
+# monai>=1.2,<2.0
+# monai-generative>=0.2,<0.3
+einops>=0.8.1
 yacs>=0.1.8
