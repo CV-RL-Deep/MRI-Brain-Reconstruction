@@ -10,7 +10,7 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
     ]
 
 setuptools.setup(
-    name="brec-mri-reconstruction",  # pip project name
+    name="brec",  # pip project name
     version="0.1.0",
     author="Matvey Faro",
     author_email="m.czygankov@bk.ru",
