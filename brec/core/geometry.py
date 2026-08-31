@@ -6,7 +6,7 @@ import tensorflow as tf
 from scipy.ndimage import find_objects
 
 from .utils import logger, PipelineTimer
-from ..config import Config
+from ..configs.config import Config
 
 
 class GeometryOps:

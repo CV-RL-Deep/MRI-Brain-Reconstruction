@@ -6,7 +6,7 @@ import numpy as np
 
 from scipy.ndimage import gaussian_filter, zoom, rotate
 
-from ..config import AugmentationConfig
+from ..configs.config import AugmentationConfig
 
 
 class AugmentationLogic:
