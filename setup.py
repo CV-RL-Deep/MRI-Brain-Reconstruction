@@ -1,5 +1,6 @@
 import setuptools
 
+
 with open("README.md", "r", encoding="utf-8") as f:
     long_description = f.read()
 
@@ -17,9 +18,8 @@ setuptools.setup(
     description="Brain MRI Reconstruction pipeline (2.5D SPADE AR)",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/matveyfaro/MRI-Brain-Reconstruction",
-    packages=setuptools.find_packages(where="experiments"),
-    package_dir={"": "experiments"},
+    url="https://github.com/CV-RL-Deep/MRI-Brain-Reconstruction",
+    packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
