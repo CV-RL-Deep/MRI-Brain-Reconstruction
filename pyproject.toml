@@ -1,3 +1,66 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brec"
+version = "0.2.1"
+
+description = "Brain MRI Reconstruction pipeline (2.5D SPADE AR)"
+readme = "README.md"
+requires-python = ">=3.11"
+
+authors = [
+    { name = "Vladimir ValV", email = "ValV@users.noreply.github.com" },
+    { name = "Matvey Faro", email = "m.czygankov@bk.ru" },
+]
+
+license = "MIT"
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    # Core Math & Data
+    "numpy>=1.26.4,<2.0",
+    "scipy>=1.15.3",
+    "pandas>=2.2.3",
+
+    # Medical Imaging & Vision
+    "nibabel>=5.3.2",
+    "scikit-image>=0.19",
+
+    # Visualization
+    "matplotlib>=3.7.2",
+    "seaborn>=0.12.2",
+    "plotly>=5.24.1",
+
+    # Utilities & Optimization
+    "tqdm>=4.67.1",
+    "psutil>=7.0.0",
+    "optuna>=4.4.0",
+    "einops>=0.8.1",
+    "yacs>=0.1.8",
+]
+
+[project.optional-dependencies]
+tf = ["tensorflow>=2.18.0"]
+torch = [
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+]
+all = [
+    "tensorflow>=2.18.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["brec*"]
+
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
 exclude = [
