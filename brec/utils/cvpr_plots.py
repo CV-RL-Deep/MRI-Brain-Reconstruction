@@ -1298,7 +1298,7 @@ def generate_supp_scaling_failure(render_errors=True):
         print(f"  -> Saved Supp_Scaling_Failure_vol{vol_idx + 1:03d}.pdf")
 
 
-def run_cvpr_rendering(render_supp=True, render_bidirectional=False):
+def run_cvpr_rendering(configs, render_supp=True, render_bidirectional=False):
     print("--- Starting CVPR Visualization Generation ---")
     generate_figure_1_drift_curve()
     generate_figure_2_evolution_matrix()
@@ -1309,7 +1309,7 @@ def run_cvpr_rendering(render_supp=True, render_bidirectional=False):
     if render_supp:
         if render_bidirectional:
             generate_supp_bidirectional()
-        generate_supp_ablation_masked_ar()
+        generate_supp_ablation_masked_ar(configs)
         generate_supp_scaling_failure(render_errors=True)
     else:
         print(

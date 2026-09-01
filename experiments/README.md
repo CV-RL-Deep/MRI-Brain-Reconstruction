@@ -117,7 +117,7 @@ main(mode=mode)
 
 Individual pipeline steps can also be invoked directly from notebook cells, e.g.
 `run_pipeline(mode='train')`, `run_ablation_study(CFG)`,
-`run_cvpr_rendering(render_supp=True)`.
+`run_cvpr_rendering(configs, render_supp=True)`.
 
 ### Environment notes
 
