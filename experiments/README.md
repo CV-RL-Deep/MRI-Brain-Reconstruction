@@ -12,7 +12,7 @@ notebook/
 │   ├── __init__.py
 │   └── config.py            # Dataclasses: ModelConfig, DataConfig, AugmentationConfig,
 │                            # TrainingConfig, HPOConfig, Config + global CFG instance
-├── src/
+├── brec/
 │   ├── core/
 │   │   ├── env.py           # KAGGLE detection, XLA path configuration (must run before TF import)
 │   │   ├── utils.py         # logger, PipelineTimer, InferenceProfiler, MemoryTelemetry,
@@ -117,12 +117,12 @@ main(mode=mode)
 
 Individual pipeline steps can also be invoked directly from notebook cells, e.g.
 `run_pipeline(mode='train')`, `run_ablation_study(CFG)`,
-`run_cvpr_rendering(render_supp=True)`.
+`run_cvpr_rendering(configs, render_supp=True)`.
 
 ### Environment notes
 
 - XLA configuration (`configure_xla_paths`) must run **before** TensorFlow is
-  imported; the bootstrap lives in `src/core/env.py` (no TF import there) and is
-  called by the first notebook cell / by `import src.core.env`.
+  imported; the bootstrap lives in `brec/core/env.py` (no TF import there) and is
+  called by the first notebook cell / by `import brec.core.env`.
 - `KAGGLE_URL_BASE=1` selects Kaggle data paths and skips the GPU-presence guard;
   otherwise a GPU is enforced at import time.
