@@ -228,9 +228,16 @@ class FourierEmbedding(layers.Layer):
 
 
 class SPADELayer(layers.Layer):
-    def __init__(self, channels, kernel_size=3, **kwargs):
+    """
+    Spatially-Adaptive Normalization (SPADE).
+    Normalizes feature activations and modulates them using scale (gamma)
+    and bias (beta) learned from the spatial segmentation/target mask.
+    """
+
+    def __init__(self, channels: int, kernel_size: int = 3, **kwargs):
         super().__init__(**kwargs)
         self.channels = channels
+        self.kernel_size = kernel_size
         self.bn = layers.BatchNormalization(center=False, scale=False)
         self.conv_mask = layers.Conv2D(
             128, kernel_size=kernel_size, padding='same', activation='relu'
@@ -242,8 +249,10 @@ class SPADELayer(layers.Layer):
             channels, kernel_size=kernel_size, padding='same'
         )
 
-    def call(self, inputs):
-        x, mask = inputs  # purely spatial
+    def call(self, inputs, **kwargs) -> tf.Tensor:
+        x, mask = (
+            inputs  # x: feature map (B, H, W, C), mask: binary geometry (B, H_m, W_m, 1)
+        )
 
         normalized = self.bn(x)
         target_size = tf.shape(x)[1:3]
@@ -258,20 +267,28 @@ class SPADELayer(layers.Layer):
 
 
 class SPADEResBlock(layers.Layer):
+    """
+    Residual block with SPADE conditioning and optional Spectral Normalization (Pillar 1).
+    """
+
     def __init__(
         self,
         filters: int,
-        input_channels: int,
+        input_channels: int = 1,
         use_spectral_norm: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.filters = filters
-        self.learned_shortcut = filters != input_channels
+        self.input_channels = input_channels
         self.use_spectral_norm = use_spectral_norm
-        f_mid = min(filters, input_channels)
+        self.learned_shortcut = filters != input_channels
+        f_mid = min(filters, input_channels) if input_channels > 1 else filters
 
-        self.spade1 = SPADELayer(input_channels)
+        # Sub-layers
+        self.spade1 = SPADELayer(
+            input_channels if input_channels > 1 else filters
+        )
         conv1_layer = layers.Conv2D(
             f_mid, 3, padding='same', kernel_initializer='he_normal'
         )
@@ -292,7 +309,9 @@ class SPADEResBlock(layers.Layer):
         )
 
         if self.learned_shortcut:
-            self.spade_s = SPADELayer(input_channels)
+            self.spade_s = SPADELayer(
+                input_channels if input_channels > 1 else filters
+            )
             conv_s_layer = layers.Conv2D(
                 filters,
                 1,
@@ -305,3 +324,19 @@ class SPADEResBlock(layers.Layer):
                 if use_spectral_norm
                 else conv_s_layer
             )
+
+    def call(self, inputs, **kwargs) -> tf.Tensor:
+        x, mask = inputs  # x: feature map, mask: spatial target mask
+
+        x_s = x
+        if self.learned_shortcut:
+            x_s = self.conv_s(self.spade_s([x, mask]))
+
+        dx = self.spade1([x, mask])
+        dx = tf.nn.relu(dx)
+        dx = self.conv1(dx)
+        dx = self.spade2([dx, mask])
+        dx = tf.nn.relu(dx)
+        dx = self.conv2(dx)
+
+        return x_s + dx
