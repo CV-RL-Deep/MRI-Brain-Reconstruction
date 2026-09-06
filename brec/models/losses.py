@@ -117,6 +117,12 @@ def get_perceptual_loss(config: Config):
     return _GLOBAL_PERCEPTUAL_LOSS
 
 
+def reset_perceptual_loss() -> None:
+    """Explicitly purges the global perceptual loss singleton to prevent VRAM memory leaks."""
+    global _GLOBAL_PERCEPTUAL_LOSS
+    _GLOBAL_PERCEPTUAL_LOSS = None
+
+
 class SpectralLoss(tf.keras.losses.Loss):
     """
     Computes the L1 distance between the Log-Magnitude of the Fourier Transforms.

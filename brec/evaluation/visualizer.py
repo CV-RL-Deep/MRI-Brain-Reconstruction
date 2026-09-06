@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw
 from scipy.ndimage import binary_dilation
 from tqdm import tqdm
 
+from ..configs.config import Config
 from ..core.utils import logger
 from ..data.cache import VolumeLoader
 
@@ -1357,3 +1358,120 @@ def display_random_dashboards(base_dirs=None):
 
             # Display the actual image natively
             display(Image(filename=chosen_file))
+
+
+def run_eda_mode(
+    config: Config,
+    train_files: list,
+    train_brats: list,
+    input_only: bool = False,
+    downsample: int = 2,
+) -> None:
+    """
+    Executes dataset simulation and generates full-brain coverage dashboards.
+    Stable diagnostic pipeline living inside brec.
+    """
+    import tensorflow as tf
+    from ..core.geometry import GeometryOps
+    from ..data.cache import ActiveLoader
+    from ..data.generators import IXIActiveGenerator, BraTSActiveGenerator
+
+    logger.info(">>> STARTING EDA DASHBOARD MODE (PIL Optimized) <<<")
+
+    manager = ActiveLoader(config, train_files, train_brats)
+    manager.start()
+
+    gen_ixi = iter(IXIActiveGenerator(manager)())
+    gen_brats_clean = iter(BraTSActiveGenerator(manager, mode='clean')())
+    gen_brats_tumor = iter(BraTSActiveGenerator(manager, mode='tumor')())
+
+    dashboards = {}
+
+    w_ixi = max(0.1, min(0.9, config.data.ixi_sampling_weight))
+    w_brats_tumor = 0.20
+
+    batch_size = config.train.batch_size
+    train_steps = max(100, (len(train_files) * 130) // batch_size)
+    epochs = config.train.epochs
+    total_samples = train_steps * batch_size * epochs
+
+    logger.info(f"Simulating {total_samples} discrete samples...")
+
+    for _ in tqdm(range(total_samples), desc="Simulating Epoch Flow"):
+        if random.random() < w_ixi:
+            dir_name = 'eda_ixi_clean'
+            model_inputs, y, info = next(gen_ixi)
+        else:
+            if random.random() < w_brats_tumor:
+                dir_name = 'eda_brats_tumor'
+                model_inputs, y, info = next(gen_brats_tumor)
+            else:
+                dir_name = 'eda_brats_clean'
+                model_inputs, y, info = next(gen_brats_clean)
+
+        hist_pad, _, _ = GeometryOps.resize_and_pad(
+            tf.convert_to_tensor(model_inputs['history_input']),
+            config.data.padded_size,
+            'bicubic',
+        )
+        y_pad, _, _ = GeometryOps.resize_and_pad(
+            tf.convert_to_tensor(y), config.data.padded_size, 'nearest'
+        )
+
+        hist_np = hist_pad.numpy()
+        y_np = y_pad.numpy()
+
+        path = info['volume_path']
+        axis = info['axis']
+        dash_key = (dir_name, path, axis)
+
+        if dash_key not in dashboards:
+            dashboards[dash_key] = VolumeDashboard(
+                path, info['axis_size'], axis, dir_name, downsample=downsample
+            )
+        dash = dashboards[dash_key]
+
+        dash.z_counter += 1
+        current_z = dash.z_counter
+
+        N = config.data.neighborhood
+        spatial_indices = info['spatial_indices']
+        padded_tumor_mask = y_np[:, :, 1]
+
+        for i in range(N):
+            img_slice = hist_np[:, :, i]
+            s_idx = spatial_indices[i]
+            role = f"T-{N - i}"
+            dash.update(
+                s_idx,
+                img_slice,
+                role,
+                info,
+                z_index=current_z,
+                is_target=False,
+                tumor_mask=padded_tumor_mask,
+            )
+
+        if not input_only:
+            target_img = y_np[:, :, 0]
+            target_s_idx = spatial_indices[-1]
+            dash.update(
+                target_s_idx,
+                target_img,
+                "T",
+                info,
+                z_index=current_z,
+                is_target=True,
+                tumor_mask=padded_tumor_mask,
+            )
+
+    VisualizationSuite.plot_sampling_statistics(manager)
+    manager.stop()
+
+    logger.info(
+        f"Rendering {len(dashboards)} unique volume dashboards to disk..."
+    )
+    for dash in tqdm(dashboards.values(), desc="Rendering Images"):
+        dash.render(input_only=input_only)
+
+    logger.info("EDA Dashboard Generation Complete!")

@@ -12,14 +12,14 @@ def configure_xla_paths():
     """
     conda_prefix = os.environ.get('CONDA_PREFIX')
     if not conda_prefix:
-        return # Not in conda, assume system paths work
+        return  # Not in conda, assume system paths work
 
     # Common locations for libdevice in Conda envs
     # It often moves around depending on nvcc/cudatoolkit version
     candidates = [
         f"{conda_prefix}/lib/libdevice.10.bc",
         f"{conda_prefix}/lib/nvidia/cuda_nvvm/libdevice/libdevice.10.bc",
-        f"{conda_prefix}/nvvm/libdevice/libdevice.10.bc"
+        f"{conda_prefix}/nvvm/libdevice/libdevice.10.bc",
     ]
 
     # Recursive search if standard paths fail (slower but robust)
@@ -30,7 +30,9 @@ def configure_xla_paths():
 
     for path in candidates:
         if os.path.exists(path):
-            cuda_dir = os.path.dirname(os.path.dirname(os.path.dirname(path))) # usually goes up to where 'bin' and 'lib' are
+            cuda_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(path))
+            )  # usually goes up to where 'bin' and 'lib' are
 
             # Often XLA wants the root of the CUDA installation (where /nvvm/libdevice lives)
             # Strategy: Point --xla_gpu_cuda_data_dir to the folder containing 'nvvm' or 'lib/nvidia'
@@ -54,7 +56,9 @@ def configure_xla_paths():
 
             return
 
-    print("⚠️ WARNING: libdevice.10.bc not found in Conda environment. XLA might fail.")
+    print(
+        "⚠️ WARNING: libdevice.10.bc not found in Conda environment. XLA might fail."
+    )
     # If not found, safer to disable XLA to prevent crash
     os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices=false'
 
@@ -64,9 +68,16 @@ KAGGLE = bool(os.environ.get('KAGGLE_URL_BASE'))
 if KAGGLE:
     print(f"Kaggle has XLA paths configured.")
 
-if KAGGLE:
-    PATH_DATA_IXI = '/kaggle/input/preprocessed-oasis-and-epilepsy-and-ixi'
-    PATH_DATA_BRATS = '/kaggle/input/brats20-dataset-training-validation/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData'
-else:
-    PATH_DATA_IXI = 'data/ixi'
-    PATH_DATA_BRATS = 'data/brats/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData'
+# if KAGGLE:
+#     PATH_DATA_IXI = '/kaggle/input/preprocessed-oasis-and-epilepsy-and-ixi'
+#     PATH_DATA_BRATS = '/kaggle/input/brats20-dataset-training-validation/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData'
+# else:
+#     PATH_DATA_IXI = 'data/ixi'
+#     PATH_DATA_BRATS = 'data/brats/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData'
+
+# Dynamic environment-driven paths (No hardcoded Kaggle paths)
+PATH_DATA_IXI = os.getenv('PATH_DATA_IXI', 'data/ixi')
+PATH_DATA_BRATS = os.getenv(
+    'PATH_DATA_BRATS',
+    'data/brats/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
+)

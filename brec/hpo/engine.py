@@ -10,6 +10,7 @@ import optuna
 import tensorflow as tf
 
 from ..configs.config import Config
+from ..core.env import KAGGLE
 from ..core.utils import logger, telemetry
 from ..data.cache import StaticLoader
 from ..data.generators import (
@@ -541,10 +542,8 @@ class HPMEngine:
         if 'w_fm' in best_params:
             self.cfg.train.weight_fm = best_params['w_fm']
 
-        # FIX: Restore full RAM capacity for standard training before saving!
-        # TODO: de-hardcode
-        self.cfg.data.ixi_cache_size = 120
-        self.cfg.data.brats_cache_size = 120
+        self.cfg.data.ixi_cache_size = 120 if KAGGLE else 240
+        self.cfg.data.brats_cache_size = 120 if KAGGLE else 240
 
         path = self.cfg.hpo.best_params_file
         self.cfg.save(path)

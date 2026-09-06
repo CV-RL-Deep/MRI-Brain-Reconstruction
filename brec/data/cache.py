@@ -10,6 +10,8 @@ from typing import Optional
 import nibabel as nib
 import numpy as np
 
+from ..core.utils import logger
+
 
 # --- 0. Statistics Container ---
 class DataStatistics:
@@ -114,7 +116,7 @@ class VolumeLoader:
             return MedicalVolume(t1_data, seg_data, path=t1_path)
 
         except Exception as e:
-            # logger.warning(f"Load Failed {t1_path}: {e}") # logger needs import or pass
+            logger.warning(f"VolumeLoader failed for {t1_path}: {e}")
             return None
 
 

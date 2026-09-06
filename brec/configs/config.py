@@ -74,10 +74,23 @@ class DataConfig:
     )  # 5760 for the last 5 epochs
 
     # ---> NEW: Centralized Ablation Path <---
-    weights_dir: str = None
-    preload_dir: str = None
-    results_dir: str = 'ablation_results'
-    figures_dir: str = 'paper_figures'
+    # weights_dir: str = None
+    # preload_dir: str = None
+    # results_dir: str = 'ablation_results'
+    # figures_dir: str = 'paper_figures'
+    # Pure environment-driven relative paths (override via os.environ or in notebook)
+    weights_dir: str = field(
+        default_factory=lambda: os.getenv('PATH_WEIGHTS', 'ablations')
+    )
+    preload_dir: str = field(
+        default_factory=lambda: os.getenv('PATH_PRELOAD', 'ablations-latest')
+    )
+    results_dir: str = field(
+        default_factory=lambda: os.getenv('PATH_RESULTS', 'ablation_results')
+    )
+    figures_dir: str = field(
+        default_factory=lambda: os.getenv('PATH_FIGURES', 'paper_figures')
+    )
 
 
 @dataclass
