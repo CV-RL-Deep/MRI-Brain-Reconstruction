@@ -3,40 +3,78 @@ import tensorflow as tf
 
 from tensorflow.keras import layers
 
-try:
-    from tensorflow.keras.layers import SpectralNormalization
-except ImportError:
-    # Fallback: Just identity wrapper (no-op) if not available, to avoid complex custom code risks
-    class SpectralNormalization(layers.Wrapper):
-        def __init__(self, layer, **kwargs):
-            super().__init__(layer, **kwargs)
+# try:
+#     from tensorflow.keras.layers import SpectralNormalization
+# except ImportError:
+#     # Fallback: Just identity wrapper (no-op) if not available, to avoid complex custom code risks
+#     class SpectralNormalization(layers.Wrapper):
+#         def __init__(self, layer, **kwargs):
+#             super().__init__(layer, **kwargs)
 
-        def call(self, inputs, training=None):
-            return self.layer(inputs)
+#         def call(self, inputs, training=None):
+#             return self.layer(inputs)
 
 
-# class SpectralNormalization(layers.Wrapper):
-#     def __init__(self, layer, iteration=1, **kwargs):
-#         super(SpectralNormalization, self).__init__(layer, **kwargs)
-#         self.iteration = iteration
+class SpectralNormalization(layers.Wrapper):
+    """
+    Exact Spectral Normalization wrapper applying power iteration to constrain
+    the matrix/convolution operator norm ||W||_2 <= 1.0 (Lipschitz bounding).
+    """
 
-#     def build(self, input_shape):
-#         if not self.layer.built:
-#             self.layer.build(input_shape)
-#         if not hasattr(self.layer, 'kernel'):
-#             raise ValueError('Layer must have a kernel weight to use SpectralNormalization.')
+    def __init__(self, layer: layers.Layer, iteration: int = 1, **kwargs):
+        super().__init__(layer, **kwargs)
+        self.iteration = iteration
 
-#         self.w = self.layer.kernel
-#         self.w_shape = self.w.shape.as_list()
-#         self.u = self.add_weight(shape=(1, self.w_shape[-1]), initializer=tf.initializers.TruncatedNormal(stddev=0.02), trainable=False, name='sn_u', dtype=self.dtype)
+    def build(self, input_shape):
+        if not self.layer.built:
+            self.layer.build(input_shape)
 
-#     def call(self, inputs, training=None):
-#         # Power iteration
-#         # simple implementation for brevity
-#         # For full robustness, use tf.keras.layers.SpectralNormalization if available
-#         # But here is a simplified version if needed, or rely on standard Conv for now if this is too complex to inject.
-#         # Actually, let's try to import the native one first.
-#         return self.layer(inputs)
+        if not hasattr(self.layer, "kernel"):
+            raise ValueError(
+                f"Layer {self.layer.name} must have a 'kernel' attribute."
+            )
+
+        self.w = self.layer.kernel
+        self.w_shape = self.w.shape.as_list()
+
+        # Vector u for power iteration (shape matches output dimension)
+        self.u = self.add_weight(
+            shape=(1, self.w_shape[-1]),
+            initializer=tf.initializers.TruncatedNormal(stddev=0.02),
+            trainable=False,
+            name="sn_u",
+            dtype=self.w.dtype,
+        )
+        super().build(input_shape)
+
+    def call(self, inputs: tf.Tensor, training: bool = None) -> tf.Tensor:
+        # Reshape kernel to 2D matrix: (in_features * spatial, out_features)
+        w_mat = tf.reshape(self.w, [-1, self.w_shape[-1]])
+
+        u_hat = self.u
+        v_hat = None
+
+        if training:
+            for _ in range(self.iteration):
+                # v = w * u / ||w * u||
+                v_ = tf.matmul(u_hat, tf.transpose(w_mat))
+                v_hat = tf.nn.l2_normalize(v_)
+
+                # u = w^T * v / ||w^T * v||
+                u_ = tf.matmul(v_hat, w_mat)
+                u_hat = tf.nn.l2_normalize(u_)
+
+            self.u.assign(u_hat)
+
+        v_hat = tf.nn.l2_normalize(tf.matmul(u_hat, tf.transpose(w_mat)))
+        sigma = tf.matmul(tf.matmul(v_hat, w_mat), tf.transpose(u_hat))
+        sigma = tf.squeeze(sigma)
+
+        # Scale weights: W_SN = W / sigma
+        scaled_w = self.w / tf.maximum(sigma, 1e-12)
+        self.layer.kernel = scaled_w
+
+        return self.layer(inputs)
 
 
 class Sampling(layers.Layer):
@@ -220,35 +258,50 @@ class SPADELayer(layers.Layer):
 
 
 class SPADEResBlock(layers.Layer):
-    def __init__(self, filters, input_channels, **kwargs):
+    def __init__(
+        self,
+        filters: int,
+        input_channels: int,
+        use_spectral_norm: bool = False,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.filters = filters
         self.learned_shortcut = filters != input_channels
+        self.use_spectral_norm = use_spectral_norm
         f_mid = min(filters, input_channels)
 
         self.spade1 = SPADELayer(input_channels)
-        self.conv1 = layers.Conv2D(f_mid, 3, padding='same')
+        conv1_layer = layers.Conv2D(
+            f_mid, 3, padding='same', kernel_initializer='he_normal'
+        )
+        self.conv1 = (
+            SpectralNormalization(conv1_layer)
+            if use_spectral_norm
+            else conv1_layer
+        )
+
         self.spade2 = SPADELayer(f_mid)
-        self.conv2 = layers.Conv2D(filters, 3, padding='same')
+        conv2_layer = layers.Conv2D(
+            filters, 3, padding='same', kernel_initializer='he_normal'
+        )
+        self.conv2 = (
+            SpectralNormalization(conv2_layer)
+            if use_spectral_norm
+            else conv2_layer
+        )
 
         if self.learned_shortcut:
             self.spade_s = SPADELayer(input_channels)
-            self.conv_s = layers.Conv2D(
-                filters, 1, padding='same', use_bias=False
+            conv_s_layer = layers.Conv2D(
+                filters,
+                1,
+                padding='same',
+                use_bias=False,
+                kernel_initializer='he_normal',
             )
-
-    def call(self, inputs):
-        x, mask = inputs  # purely spatial
-
-        x_s = x
-        if self.learned_shortcut:
-            x_s = self.conv_s(self.spade_s([x, mask]))
-
-        dx = self.spade1([x, mask])
-        dx = tf.nn.relu(dx)
-        dx = self.conv1(dx)
-        dx = self.spade2([dx, mask])
-        dx = tf.nn.relu(dx)
-        dx = self.conv2(dx)
-
-        return x_s + dx
+            self.conv_s = (
+                SpectralNormalization(conv_s_layer)
+                if use_spectral_norm
+                else conv_s_layer
+            )

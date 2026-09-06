@@ -9,6 +9,41 @@ from scipy.ndimage import gaussian_filter, zoom, rotate
 from ..configs.config import AugmentationConfig
 
 
+class PhysicsAugmentationSchedule:
+    """
+    Closed-form analytical schedules derived from SDE error propagation
+    and spatial heat diffusion equations (Pillar 1, Section 2.6).
+    """
+
+    @staticmethod
+    def get_noise_std(k: int, sigma_0: float, L_theta: float) -> float:
+        """
+        Computes additive Gaussian noise parameter sigma_noise(k) matching
+        Fokker-Planck variance expansion: sigma_0 * sqrt((1 - L_theta^{2k}) / (1 - L_theta^2)).
+        """
+        L_sq = min(0.9999, L_theta**2)
+        variance_ratio = (1.0 - (L_sq**k)) / (1.0 - L_sq)
+        return float(sigma_0 * np.sqrt(max(0.0, variance_ratio)))
+
+    @staticmethod
+    def get_blur_params(
+        k: int, d_spatial: float, delta_z: float
+    ) -> Tuple[float, int]:
+        """
+        Computes spatial blur std sigma_blur(k) = sqrt(2 * D_spatial * k * delta_z)
+        and odd kernel size K_kernel(k) = 2 * ceil(3 * sigma_blur(k)) + 1.
+        """
+        sigma_blur = float(
+            np.sqrt(max(1e-8, 2.0 * d_spatial * float(k) * delta_z))
+        )
+        kernel_size = int(2 * np.ceil(3.0 * sigma_blur) + 1)
+        # Ensure odd kernel size >= 3
+        kernel_size = max(
+            3, kernel_size if kernel_size % 2 != 0 else kernel_size + 1
+        )
+        return sigma_blur, kernel_size
+
+
 class AugmentationLogic:
     """
     Fast NumPy/SciPy implementations for CPU-based Data Generators.
@@ -93,23 +128,34 @@ class AugmentationLogic:
 
         # Apply cascade
         # Slice index: num_slices-1 is t-1
+        # Select analytical vs heuristic parameters
+        if getattr(config, 'use_analytical_schedules', False):
+            # Sample synthetic rollout step k in [1, max_rollout_k]
+            k_step = random.randint(1, config.max_rollout_k)
+            curr_noise_std = PhysicsAugmentationSchedule.get_noise_std(
+                k=k_step, sigma_0=config.sigma_0, L_theta=config.lipschitz_bound
+            )
+            curr_blur_sigma, _ = PhysicsAugmentationSchedule.get_blur_params(
+                k=k_step, d_spatial=config.d_spatial, delta_z=config.delta_z
+            )
+        else:
+            curr_noise_std = config.noise_std
+            curr_blur_sigma = config.blur_sigma
+
         for i in range(num_slices - 1, -1, -1):
             # Apply current mode
             slice_data = stack[i]
 
-            # Apply based on current mode
             apply_blur = (current_mode == 'blur') or (current_mode == 'both')
             apply_noise = (current_mode == 'noise') or (current_mode == 'both')
 
             if apply_blur:
-                slice_data = gaussian_filter(
-                    slice_data, sigma=config.blur_sigma
-                )
+                slice_data = gaussian_filter(slice_data, sigma=curr_blur_sigma)
                 flags['blur_applied'] = True
 
             if apply_noise:
                 mask = (slice_data > 0.01).astype(np.float32)
-                noise = np.random.normal(0, config.noise_std, slice_data.shape)
+                noise = np.random.normal(0, curr_noise_std, slice_data.shape)
                 slice_data = slice_data + (noise * mask)
                 flags['noise_applied'] = True
 

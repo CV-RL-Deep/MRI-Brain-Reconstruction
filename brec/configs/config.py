@@ -31,6 +31,10 @@ class ModelConfig:
     use_positional_encoding: bool = False
     num_hypotheses: int = 1  # set to 1 for baseline, >1 (e.g., 4) for MHP
     mhp_epsilon: float = 0.05  # relaxation parameter to prevent dead heads (https://arxiv.org/abs/1612.00197)
+    use_spectral_norm: bool = (
+        False  # wraps decoder conv layers to enforce L_theta <= 1.0
+    )
+    spectral_norm_iterations: int = 1
 
 
 @dataclass
@@ -122,6 +126,17 @@ class AugmentationConfig:
     rotate_range: float = (
         3.5  # degrees (+/-) 45 is too aggressive for brain fitting
     )
+    # Analytical SDE Augmentation Parameters (Pillar 1)
+    use_analytical_schedules: bool = (
+        False  # Toggle analytical vs heuristic corruptions
+    )
+    sigma_0: float = 0.015  # Baseline single-step innovation RMSE
+    d_spatial: float = 0.045  # Spatial Laplacian diffusion coefficient
+    delta_z: float = 1.0  # Inter-slice spatial thickness
+    lipschitz_bound: float = (
+        0.95  # Theoretical upper bound on decoder Lipschitz constant
+    )
+    max_rollout_k: int = 20  # Maximum rollout horizon for training corruptions
 
 
 @dataclass

@@ -5,6 +5,8 @@ import tensorflow as tf
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
 
+from ..core.utils import logger
+
 
 @tf.function
 def get_oracle_prediction(y_true, y_pred):
@@ -269,3 +271,153 @@ class Evaluator:
         for ax in axes:
             ax.axis('off')
         plt.show()
+
+
+class Pillar1Diagnostics:
+    """
+    Mathematical calibration and empirical validation tools for Pillar 1.
+    """
+
+    @staticmethod
+    def estimate_baseline_innovation_variance(
+        model: tf.keras.Model,
+        val_generator,
+        num_batches: int = 30,
+    ) -> float:
+        """
+        Measures baseline single-step residual innovation standard deviation:
+        sigma_0 = sqrt(E[ (x_t* - f_theta(C_t*))^2 ]) on clean validation pairs.
+        """
+        residuals = []
+        for i, (x_batch, y_batch) in enumerate(val_generator):
+            if i >= num_batches:
+                break
+            preds = model(x_batch, training=False)
+            gt = y_batch[..., 0:1]
+            if preds.shape[-1] > 1:
+                preds = preds[..., 0:1]
+            diff = (gt - preds).numpy().flatten()
+            residuals.extend(diff)
+
+        sigma_0 = float(np.std(residuals))
+        logger.info(
+            f"Empirically Estimated Baseline Innovation sigma_0: {sigma_0:.6f}"
+        )
+        return sigma_0
+
+    @staticmethod
+    def estimate_spatial_diffusion_coefficient(
+        volumes: list[np.ndarray],
+        delta_z: float = 1.0,
+    ) -> float:
+        """
+        Estimates D_spatial from clean ground-truth slice sequences using discrete 2D Laplacians:
+        D_spatial = E_z ||laplacian(x_z) - laplacian(x_{z-delta_z})||_2^2 / (2 * delta_z * E_z ||laplacian(x_z)||_2^2)
+        """
+        from scipy.ndimage import laplace
+
+        numerator_sum = 0.0
+        denominator_sum = 0.0
+
+        for vol in volumes:
+            Z = vol.shape[0]
+            for z in range(1, Z):
+                slice_curr = vol[z]
+                slice_prev = vol[z - 1]
+
+                # Background exclusion mask
+                mask = (slice_curr > 0.01) | (slice_prev > 0.01)
+                if np.sum(mask) < 100:
+                    continue
+
+                lap_curr = laplace(slice_curr)
+                lap_prev = laplace(slice_prev)
+
+                diff_sq = np.sum((lap_curr[mask] - lap_prev[mask]) ** 2)
+                energy_sq = np.sum((lap_curr[mask]) ** 2)
+
+                numerator_sum += diff_sq
+                denominator_sum += energy_sq
+
+        if denominator_sum < 1e-12:
+            return 0.045
+
+        d_spatial = float(numerator_sum / (2.0 * delta_z * denominator_sum))
+        logger.info(
+            f"Empirically Estimated Spatial Diffusion Coefficient D_spatial: {d_spatial:.6f}"
+        )
+        return d_spatial
+
+    @staticmethod
+    def estimate_empirical_lipschitz(
+        model: tf.keras.Model,
+        val_batch: dict,
+        perturbation_std: float = 0.02,
+        num_trials: int = 10,
+    ) -> float:
+        """
+        Evaluates empirical Lipschitz constant ratio:
+        L_hat = ||f_theta(C + Delta C) - f_theta(C)||_2 / ||Delta C||_2
+        """
+        ratios = []
+        hist_input = val_batch["history_input"]
+
+        for _ in range(num_trials):
+            delta_c = tf.random.normal(
+                tf.shape(hist_input), mean=0.0, stddev=perturbation_std
+            )
+            perturbed_batch = {k: tf.identity(v) for k, v in val_batch.items()}
+            perturbed_batch["history_input"] = hist_input + delta_c
+
+            out_clean = model(val_batch, training=False)
+            out_perturbed = model(perturbed_batch, training=False)
+
+            if out_clean.shape[-1] > 1:
+                out_clean = out_clean[..., 0:1]
+                out_perturbed = out_perturbed[..., 0:1]
+
+            norm_delta_out = tf.norm(
+                tf.reshape(out_perturbed - out_clean, [-1])
+            )
+            norm_delta_in = tf.norm(tf.reshape(delta_c, [-1]))
+
+            ratio = float(norm_delta_out / tf.maximum(norm_delta_in, 1e-12))
+            ratios.append(ratio)
+
+        l_hat = float(np.mean(ratios))
+        logger.info(f"Measured Empirical Lipschitz Constant L_hat: {l_hat:.4f}")
+        return l_hat
+
+    @staticmethod
+    def compute_stepwise_error_variance(
+        gt_vol: np.ndarray,
+        pred_vol: np.ndarray,
+        start_idx: int,
+        end_idx: int,
+    ) -> list[dict]:
+        """
+        Calculates per-step spatial error variance Var(delta_k) along the rollout trajectory.
+        """
+        results = []
+        for i, z_idx in enumerate(range(start_idx, end_idx)):
+            k = i + 1
+            gt_slice = gt_vol[z_idx]
+            pr_slice = pred_vol[z_idx]
+
+            mask = gt_slice > 0.01
+            if not np.any(mask):
+                continue
+
+            delta = (gt_slice[mask] - pr_slice[mask]).flatten()
+            variance = float(np.var(delta))
+            mae = float(np.mean(np.abs(delta)))
+
+            results.append(
+                {
+                    "Rollout_Step_k": k,
+                    "Z_Index": z_idx,
+                    "Error_Variance": variance,
+                    "MAE": mae,
+                }
+            )
+        return results

@@ -362,26 +362,30 @@ class ModelBuilder:
         # -------------------------------------------
 
         # 7. Decoder with SPADE and Skip Modulation
+        use_sn = getattr(config.model, 'use_spectral_norm', False)
+
         for i, skip in enumerate(reversed(skips)):
             filters = decoder_filters[i] if i < len(decoder_filters) else base_f
 
-            x = layers.Conv2D(filters * 4, 1, padding='same')(x)
+            upsample_conv = layers.Conv2D(
+                filters * 4, 1, padding='same', kernel_initializer='he_normal'
+            )
+            if use_sn:
+                upsample_conv = SpectralNormalization(upsample_conv)
+
+            x = upsample_conv(x)
             x = layers.Lambda(lambda z: tf.nn.depth_to_space(z, block_size=2))(
                 x
             )
 
-            # if skip is not None:
-            #     # 8. Skip Connection Injection (Relative Position)
-            #     # Modulates the local skip features using the sequence trajectory
-            #     modulated_skip = FiLMLayer(name=f'skip_film_rel_{i}')([skip, p_rel_emb])
-
-            #     x = layers.Concatenate()([x, modulated_skip])
             if skip is not None:
                 x = layers.Concatenate()([x, skip])
 
             # 8. SPADE Block (Conditioned strictly on Spatial Mask)
-            # SPADE Block receives ONLY the feature map and spatial mask
-            x = SPADEResBlock(filters, 1)([x, mask_input])
+            # SPADE Block receives feature map and spatial mask
+            x = SPADEResBlock(filters, 1, use_spectral_norm=use_sn)(
+                [x, mask_input]
+            )
 
         # 9. Final PixelShuffle
         if config.model.backbone:
