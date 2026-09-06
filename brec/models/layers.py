@@ -3,78 +3,84 @@ import tensorflow as tf
 
 from tensorflow.keras import layers
 
-# try:
-#     from tensorflow.keras.layers import SpectralNormalization
-# except ImportError:
-#     # Fallback: Just identity wrapper (no-op) if not available, to avoid complex custom code risks
-#     class SpectralNormalization(layers.Wrapper):
-#         def __init__(self, layer, **kwargs):
-#             super().__init__(layer, **kwargs)
+# Import official Keras 3 / TF native SpectralNormalization
+try:
+    from tensorflow.keras.layers import SpectralNormalization
+except ImportError:
+    try:
+        from keras.layers import SpectralNormalization
+    except ImportError:
 
-#         def call(self, inputs, training=None):
-#             return self.layer(inputs)
+        class SpectralNormalization(layers.Wrapper):
+            """Fallback no-op wrapper if SpectralNormalization is unavailable."""
+
+            def __init__(self, layer, **kwargs):
+                super().__init__(layer, **kwargs)
+
+            def call(self, inputs, training=None):
+                return self.layer(inputs)
 
 
-class SpectralNormalization(layers.Wrapper):
-    """
-    Exact Spectral Normalization wrapper applying power iteration to constrain
-    the matrix/convolution operator norm ||W||_2 <= 1.0 (Lipschitz bounding).
-    """
+# class SpectralNormalization(layers.Wrapper):
+#     """
+#     Exact Spectral Normalization wrapper applying power iteration to constrain
+#     the matrix/convolution operator norm ||W||_2 <= 1.0 (Lipschitz bounding).
+#     """
 
-    def __init__(self, layer: layers.Layer, iteration: int = 1, **kwargs):
-        super().__init__(layer, **kwargs)
-        self.iteration = iteration
+#     def __init__(self, layer: layers.Layer, iteration: int = 1, **kwargs):
+#         super().__init__(layer, **kwargs)
+#         self.iteration = iteration
 
-    def build(self, input_shape):
-        if not self.layer.built:
-            self.layer.build(input_shape)
+#     def build(self, input_shape):
+#         if not self.layer.built:
+#             self.layer.build(input_shape)
 
-        if not hasattr(self.layer, "kernel"):
-            raise ValueError(
-                f"Layer {self.layer.name} must have a 'kernel' attribute."
-            )
+#         if not hasattr(self.layer, "kernel"):
+#             raise ValueError(
+#                 f"Layer {self.layer.name} must have a 'kernel' attribute."
+#             )
 
-        self.w = self.layer.kernel
-        self.w_shape = self.w.shape.as_list()
+#         self.w = self.layer.kernel
+#         self.w_shape = self.w.shape.as_list()
 
-        # Vector u for power iteration (shape matches output dimension)
-        self.u = self.add_weight(
-            shape=(1, self.w_shape[-1]),
-            initializer=tf.initializers.TruncatedNormal(stddev=0.02),
-            trainable=False,
-            name="sn_u",
-            dtype=self.w.dtype,
-        )
-        super().build(input_shape)
+#         # Vector u for power iteration (shape matches output dimension)
+#         self.u = self.add_weight(
+#             shape=(1, self.w_shape[-1]),
+#             initializer=tf.initializers.TruncatedNormal(stddev=0.02),
+#             trainable=False,
+#             name="sn_u",
+#             dtype=self.w.dtype,
+#         )
+#         super().build(input_shape)
 
-    def call(self, inputs: tf.Tensor, training: bool = None) -> tf.Tensor:
-        # Reshape kernel to 2D matrix: (in_features * spatial, out_features)
-        w_mat = tf.reshape(self.w, [-1, self.w_shape[-1]])
+#     def call(self, inputs: tf.Tensor, training: bool = None) -> tf.Tensor:
+#         # Reshape kernel to 2D matrix: (in_features * spatial, out_features)
+#         w_mat = tf.reshape(self.w, [-1, self.w_shape[-1]])
 
-        u_hat = self.u
-        v_hat = None
+#         u_hat = self.u
+#         v_hat = None
 
-        if training:
-            for _ in range(self.iteration):
-                # v = w * u / ||w * u||
-                v_ = tf.matmul(u_hat, tf.transpose(w_mat))
-                v_hat = tf.nn.l2_normalize(v_)
+#         if training:
+#             for _ in range(self.iteration):
+#                 # v = w * u / ||w * u||
+#                 v_ = tf.matmul(u_hat, tf.transpose(w_mat))
+#                 v_hat = tf.nn.l2_normalize(v_)
 
-                # u = w^T * v / ||w^T * v||
-                u_ = tf.matmul(v_hat, w_mat)
-                u_hat = tf.nn.l2_normalize(u_)
+#                 # u = w^T * v / ||w^T * v||
+#                 u_ = tf.matmul(v_hat, w_mat)
+#                 u_hat = tf.nn.l2_normalize(u_)
 
-            self.u.assign(u_hat)
+#             self.u.assign(u_hat)
 
-        v_hat = tf.nn.l2_normalize(tf.matmul(u_hat, tf.transpose(w_mat)))
-        sigma = tf.matmul(tf.matmul(v_hat, w_mat), tf.transpose(u_hat))
-        sigma = tf.squeeze(sigma)
+#         v_hat = tf.nn.l2_normalize(tf.matmul(u_hat, tf.transpose(w_mat)))
+#         sigma = tf.matmul(tf.matmul(v_hat, w_mat), tf.transpose(u_hat))
+#         sigma = tf.squeeze(sigma)
 
-        # Scale weights: W_SN = W / sigma
-        scaled_w = self.w / tf.maximum(sigma, 1e-12)
-        self.layer.kernel = scaled_w
+#         # Scale weights: W_SN = W / sigma
+#         scaled_w = self.w / tf.maximum(sigma, 1e-12)
+#         self.layer.kernel = scaled_w
 
-        return self.layer(inputs)
+#         return self.layer(inputs)
 
 
 class Sampling(layers.Layer):
